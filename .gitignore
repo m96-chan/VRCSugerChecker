@@ -38,6 +38,15 @@ env/
 # Logs
 *.log
 vrchat_checker.log
+logs/*.log
+logs/*.txt
+logs/*.wav
+logs/*.mp3
+logs/*.ogg
+logs/screenshots/*.png
+logs/screenshots/*.jpg
+logs/screenshots/*.jpeg
+!logs/.gitkeep
 
 # Windows
 Thumbs.db
@@ -60,3 +69,4 @@ VRChatLogs/
 .env.local
 credentials.json
 config.local.yml
+config.json

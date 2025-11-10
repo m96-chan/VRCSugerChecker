@@ -1,0 +1,41 @@
+{
+  "discord": {
+    "enabled": false,
+    "webhook_url": "https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN",
+    "username": "VRChat Sugar Checker",
+    "avatar_url": "",
+    "notifications": {
+      "vrchat_started": true,
+      "vrchat_stopped": true,
+      "instance_info": true,
+      "instance_changed": true,
+      "user_joined": false,
+      "user_left": false
+    }
+  },
+  "monitoring": {
+    "check_interval": 5,
+    "log_update_interval": 30
+  },
+  "audio": {
+    "enabled": false,
+    "device_name": null,
+    "format": "wav",
+    "auto_start": true,
+    "auto_stop": true,
+    "retention_days": 7
+  },
+  "logs": {
+    "retention_days": 7,
+    "text_logs": true,
+    "audio_logs": true
+  },
+  "screenshot": {
+    "enabled": false,
+    "on_vrchat_start": false,
+    "on_instance_change": true,
+    "auto_capture": true,
+    "auto_capture_interval": 180,
+    "retention_days": 7
+  }
+}
