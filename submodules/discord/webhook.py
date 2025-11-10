@@ -115,17 +115,6 @@ class DiscordWebhook:
         Returns:
             bool: 送信成功ならTrue
         """
-        # ユーザーリストを整形
-        user_list = []
-        for i, (display_name, user_id) in enumerate(sorted(users.items()), 1):
-            user_list.append(f"{i}. {display_name}")
-            # 最大20人まで表示
-            if i >= 20:
-                remaining = len(users) - 20
-                if remaining > 0:
-                    user_list.append(f"... 他{remaining}人")
-                break
-
         fields = [
             {
                 "name": "🌍 ワールド",
@@ -136,13 +125,15 @@ class DiscordWebhook:
                 "name": "📍 インスタンスID",
                 "value": f"```{instance_id or '不明'}```",
                 "inline": False
-            },
-            {
-                "name": f"👥 一緒にいるユーザー ({user_count}人)",
-                "value": "\n".join(user_list) if user_list else "なし",
-                "inline": False
             }
         ]
+
+        # ユーザーリストを整形（リンク付き）
+        # Discord fieldのvalue制限: 1024文字
+        # 複数のfieldに分割して表示
+        sorted_users = sorted(users.items())
+        user_fields = self._create_user_fields(sorted_users, user_count)
+        fields.extend(user_fields)
 
         embed = {
             "title": "📊 インスタンス情報",
@@ -155,6 +146,62 @@ class DiscordWebhook:
         }
         return self.send(embed=embed)
 
+    def _create_user_fields(self, sorted_users: list, user_count: int) -> list:
+        """
+        ユーザーリストをDiscord fieldの制限に合わせて分割
+        Args:
+            sorted_users: ソート済みユーザーリスト [(display_name, user_id), ...]
+            user_count: 総ユーザー数
+        Returns:
+            list: Discord fields のリスト
+        """
+        fields = []
+        current_field_lines = []
+        current_field_length = 0
+        field_num = 1
+        user_index = 1
+
+        # Discord fieldのvalue制限: 1024文字
+        # 余裕を持って900文字で区切る
+        MAX_FIELD_LENGTH = 900
+
+        for display_name, user_id in sorted_users:
+            # VRChatプロフィールリンクを作成
+            profile_url = f"https://vrchat.com/home/user/{user_id}"
+            line = f"{user_index}. [{display_name}]({profile_url})"
+            line_length = len(line) + 1  # +1 for newline
+
+            # 現在のfieldに追加すると制限を超える場合
+            if current_field_length + line_length > MAX_FIELD_LENGTH and current_field_lines:
+                # 現在のfieldを保存
+                field_title = f"👥 一緒にいるユーザー ({user_count}人)" if field_num == 1 else f"👥 一緒にいるユーザー (続き {field_num})"
+                fields.append({
+                    "name": field_title,
+                    "value": "\n".join(current_field_lines),
+                    "inline": False
+                })
+
+                # 新しいfieldを開始
+                current_field_lines = []
+                current_field_length = 0
+                field_num += 1
+
+            # 行を追加
+            current_field_lines.append(line)
+            current_field_length += line_length
+            user_index += 1
+
+        # 最後のfieldを追加
+        if current_field_lines:
+            field_title = f"👥 一緒にいるユーザー ({user_count}人)" if field_num == 1 else f"👥 一緒にいるユーザー (続き {field_num})"
+            fields.append({
+                "name": field_title,
+                "value": "\n".join(current_field_lines),
+                "inline": False
+            })
+
+        return fields
+
     def send_user_joined(self, display_name: str, user_id: str, user_count: int) -> bool:
         """
         ユーザー参加通知を送信
@@ -165,9 +212,10 @@ class DiscordWebhook:
         Returns:
             bool: 送信成功ならTrue
         """
+        profile_url = f"https://vrchat.com/home/user/{user_id}"
         embed = {
             "title": "✅ ユーザー参加",
-            "description": f"**{display_name}** が参加しました",
+            "description": f"**[{display_name}]({profile_url})** が参加しました",
             "color": 0x2ecc71,  # 緑色
             "fields": [
                 {
@@ -198,9 +246,10 @@ class DiscordWebhook:
         Returns:
             bool: 送信成功ならTrue
         """
+        profile_url = f"https://vrchat.com/home/user/{user_id}"
         embed = {
             "title": "❌ ユーザー退出",
-            "description": f"**{display_name}** が退出しました",
+            "description": f"**[{display_name}]({profile_url})** が退出しました",
             "color": 0xe74c3c,  # 赤色
             "fields": [
                 {

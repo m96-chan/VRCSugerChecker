@@ -5,6 +5,7 @@ VRChatログファイル解析スクリプト
 """
 import os
 import re
+import platform
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Set
@@ -18,7 +19,14 @@ def get_vrchat_log_directory():
         Path: ログディレクトリのパス
     """
     # WSL環境かどうかチェック
-    if 'microsoft' in os.uname().release.lower():
+    is_wsl = False
+    try:
+        if platform.system() == 'Linux' and 'microsoft' in platform.release().lower():
+            is_wsl = True
+    except Exception:
+        pass
+
+    if is_wsl:
         # WSLの場合、/mnt/c/Users/... の形式を試す
         username = os.getenv('USER')
         # Windows側のユーザー名を取得（環境変数から）

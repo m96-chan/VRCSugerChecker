@@ -17,6 +17,19 @@ from datetime import datetime
 from typing import Optional, Tuple
 import subprocess
 
+# Win32 API imports
+try:
+    import win32gui
+    import win32ui
+    import win32con
+    import win32api
+    from ctypes import windll
+    from PIL import Image
+    WIN32_AVAILABLE = True
+except ImportError:
+    WIN32_AVAILABLE = False
+    logging.warning("pywin32が利用できません。フォールバック方式でスクリーンショットを撮影します")
+
 logger = logging.getLogger(__name__)
 
 
@@ -39,11 +52,48 @@ class ScreenshotCapture:
         self.screenshots_dir = logs_dir / "screenshots"
         self.screenshots_dir.mkdir(parents=True, exist_ok=True)
 
-    def find_vrchat_window(self) -> bool:
+    def find_vrchat_window(self) -> Optional[int]:
         """
         VRChatウィンドウを検索
         Returns:
-            bool: VRChatウィンドウが見つかった場合True
+            Optional[int]: VRChatウィンドウハンドル（見つからない場合はNone）
+        """
+        if WIN32_AVAILABLE:
+            return self._find_vrchat_window_win32()
+        else:
+            return self._find_vrchat_window_powershell()
+
+    def _find_vrchat_window_win32(self) -> Optional[int]:
+        """
+        Win32 APIを使用してVRChatウィンドウを検索
+        Returns:
+            Optional[int]: VRChatウィンドウハンドル（見つからない場合はNone）
+        """
+        try:
+            vrchat_hwnd = None
+
+            def enum_windows_callback(hwnd, _):
+                nonlocal vrchat_hwnd
+                if win32gui.IsWindowVisible(hwnd):
+                    window_text = win32gui.GetWindowText(hwnd)
+                    # VRChatウィンドウのタイトルを検索
+                    if "VRChat" in window_text:
+                        vrchat_hwnd = hwnd
+                        return False  # 見つかったので列挙を停止
+                return True
+
+            win32gui.EnumWindows(enum_windows_callback, None)
+            return vrchat_hwnd
+
+        except Exception as e:
+            logger.error(f"VRChatウィンドウの検索中にエラー (Win32): {e}")
+            return None
+
+    def _find_vrchat_window_powershell(self) -> Optional[int]:
+        """
+        PowerShellを使用してVRChatウィンドウを検索（フォールバック）
+        Returns:
+            Optional[int]: VRChatウィンドウハンドル（見つからない場合はNone）
         """
         try:
             # PowerShell経由でVRChatウィンドウを検索
@@ -62,12 +112,15 @@ class ScreenshotCapture:
                 if len(lines) > 2:  # ヘッダー行をスキップ
                     handle_line = lines[2].strip()
                     if handle_line and handle_line != "0":
-                        return True
+                        try:
+                            return int(handle_line)
+                        except ValueError:
+                            pass
 
-            return False
+            return None
         except Exception as e:
-            logger.error(f"VRChatウィンドウの検索中にエラー: {e}")
-            return False
+            logger.error(f"VRChatウィンドウの検索中にエラー (PowerShell): {e}")
+            return None
 
     def capture_vrchat_window(self, prefix: str = "vrchat", reason: str = "") -> Optional[Path]:
         """
@@ -80,7 +133,8 @@ class ScreenshotCapture:
         """
         try:
             # VRChatウィンドウが存在するかチェック
-            if not self.find_vrchat_window():
+            hwnd = self.find_vrchat_window()
+            if not hwnd:
                 logger.warning("VRChatウィンドウが見つかりません")
                 return None
 
@@ -93,8 +147,105 @@ class ScreenshotCapture:
 
             screenshot_path = self.screenshots_dir / filename
 
+            # Win32 APIを使用してキャプチャ
+            if WIN32_AVAILABLE:
+                success = self._capture_window_win32(hwnd, screenshot_path)
+            else:
+                success = self._capture_window_powershell(screenshot_path)
+
+            if success and screenshot_path.exists():
+                logger.info(f"スクリーンショットを保存: {filename}")
+                return screenshot_path
+            else:
+                logger.error(f"スクリーンショットの保存に失敗")
+                return None
+
+        except Exception as e:
+            logger.error(f"スクリーンショットのキャプチャ中にエラー: {e}")
+            return None
+
+    def _capture_window_win32(self, hwnd: int, save_path: Path) -> bool:
+        """
+        Win32 APIを使用してウィンドウをキャプチャ
+        Args:
+            hwnd: ウィンドウハンドル
+            save_path: 保存先パス
+        Returns:
+            bool: 成功した場合True
+        """
+        try:
+            # ウィンドウの位置とサイズを取得
+            left, top, right, bottom = win32gui.GetWindowRect(hwnd)
+            width = right - left
+            height = bottom - top
+
+            # ウィンドウが最小化されている場合はスキップ
+            if width <= 0 or height <= 0:
+                logger.warning("ウィンドウが最小化されているか、サイズが0です")
+                return False
+
+            # デバイスコンテキストを取得
+            hwndDC = win32gui.GetWindowDC(hwnd)
+            mfcDC = win32ui.CreateDCFromHandle(hwndDC)
+            saveDC = mfcDC.CreateCompatibleDC()
+
+            # ビットマップを作成
+            saveBitMap = win32ui.CreateBitmap()
+            saveBitMap.CreateCompatibleBitmap(mfcDC, width, height)
+            saveDC.SelectObject(saveBitMap)
+
+            # ウィンドウの内容をコピー
+            # ctypes経由でPrintWindowを呼び出す
+            # PW_RENDERFULLCONTENT = 0x00000002
+            # PW_CLIENTONLY = 0x00000001
+            PW_RENDERFULLCONTENT = 0x00000002
+            result = windll.user32.PrintWindow(hwnd, saveDC.GetSafeHdc(), PW_RENDERFULLCONTENT)
+
+            # 結果が0の場合、通常のBitBltを試す
+            if result == 0:
+                logger.warning("PrintWindowが失敗しました。BitBltを試します")
+                result = saveDC.BitBlt(
+                    (0, 0), (width, height),
+                    mfcDC,
+                    (0, 0),
+                    win32con.SRCCOPY
+                )
+
+            # ビットマップをPIL Imageに変換
+            bmpinfo = saveBitMap.GetInfo()
+            bmpstr = saveBitMap.GetBitmapBits(True)
+
+            img = Image.frombuffer(
+                'RGB',
+                (bmpinfo['bmWidth'], bmpinfo['bmHeight']),
+                bmpstr, 'raw', 'BGRX', 0, 1
+            )
+
+            # ファイルに保存
+            img.save(str(save_path), 'PNG')
+
+            # クリーンアップ
+            win32gui.DeleteObject(saveBitMap.GetHandle())
+            saveDC.DeleteDC()
+            mfcDC.DeleteDC()
+            win32gui.ReleaseDC(hwnd, hwndDC)
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Win32ウィンドウキャプチャ中にエラー: {e}")
+            return False
+
+    def _capture_window_powershell(self, save_path: Path) -> bool:
+        """
+        PowerShellを使用してウィンドウをキャプチャ（フォールバック）
+        Args:
+            save_path: 保存先パス
+        Returns:
+            bool: 成功した場合True
+        """
+        try:
             # PowerShellスクリプトでスクリーンショットを撮影
-            # Add-Type でWindows APIを使用してVRChatウィンドウをキャプチャ
             ps_script = f"""
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -107,19 +258,6 @@ if ($process -eq $null) {{
     exit 1
 }}
 
-# ウィンドウハンドルを取得
-$hwnd = $process.MainWindowHandle
-
-if ($hwnd -eq 0) {{
-    Write-Host "VRChat window not found"
-    exit 1
-}}
-
-# ウィンドウを前面に表示（オプション、コメントアウト可）
-# [void][System.Reflection.Assembly]::LoadWithPartialName("Microsoft.VisualBasic")
-# [Microsoft.VisualBasic.Interaction]::AppActivate($process.Id)
-# Start-Sleep -Milliseconds 500
-
 # 画面全体をキャプチャ（VRChatがフルスクリーンの場合）
 $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
 $bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
@@ -127,13 +265,13 @@ $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
 $graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
 
 # ファイルに保存
-$bitmap.Save("{str(screenshot_path).replace(chr(92), chr(92)*2)}", [System.Drawing.Imaging.ImageFormat]::Png)
+$bitmap.Save("{str(save_path).replace(chr(92), chr(92)*2)}", [System.Drawing.Imaging.ImageFormat]::Png)
 
 # クリーンアップ
 $graphics.Dispose()
 $bitmap.Dispose()
 
-Write-Host "Screenshot saved: {filename}"
+Write-Host "Screenshot saved"
 """
 
             # PowerShellスクリプトを実行
@@ -144,16 +282,11 @@ Write-Host "Screenshot saved: {filename}"
                 timeout=10
             )
 
-            if result.returncode == 0 and screenshot_path.exists():
-                logger.info(f"スクリーンショットを保存: {filename}")
-                return screenshot_path
-            else:
-                logger.error(f"スクリーンショットの保存に失敗: {result.stderr}")
-                return None
+            return result.returncode == 0
 
         except Exception as e:
-            logger.error(f"スクリーンショットのキャプチャ中にエラー: {e}")
-            return None
+            logger.error(f"PowerShellウィンドウキャプチャ中にエラー: {e}")
+            return False
 
     def capture_on_instance_change(self, instance_id: str, world_name: str = "") -> Optional[Path]:
         """

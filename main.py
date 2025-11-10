@@ -330,22 +330,24 @@ def update_log_monitoring():
                     )
 
         # ユーザーの参加/退出を検出
-        if discord_webhook:
-            notifications = config.get("discord", {}).get("notifications", {})
+        # 最初のログ監視開始時はlast_usersが空なので、通知を送らない
+        if current_instance == last_instance_id and last_users:
+            if discord_webhook:
+                notifications = config.get("discord", {}).get("notifications", {})
 
-            # 新規参加ユーザー
-            if notifications.get("user_joined", False):
-                for user, user_id in current_users.items():
-                    if user not in last_users:
-                        print(f"\n[検出] ユーザー参加: {user}")
-                        discord_webhook.send_user_joined(user, user_id, len(current_users))
+                # 新規参加ユーザー
+                if notifications.get("user_joined", False):
+                    for user, user_id in current_users.items():
+                        if user not in last_users:
+                            print(f"\n[検出] ユーザー参加: {user}")
+                            discord_webhook.send_user_joined(user, user_id, len(current_users))
 
-            # 退出ユーザー
-            if notifications.get("user_left", False):
-                for user, user_id in last_users.items():
-                    if user not in current_users:
-                        print(f"\n[検出] ユーザー退出: {user}")
-                        discord_webhook.send_user_left(user, user_id, len(current_users))
+                # 退出ユーザー
+                if notifications.get("user_left", False):
+                    for user, user_id in last_users.items():
+                        if user not in current_users:
+                            print(f"\n[検出] ユーザー退出: {user}")
+                            discord_webhook.send_user_left(user, user_id, len(current_users))
 
         # 状態を更新
         last_instance_id = current_instance

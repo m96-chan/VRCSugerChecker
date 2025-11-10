@@ -42,8 +42,10 @@ env/
 
 # Logs
 *.log
+*.log.*
 vrchat_checker.log
 logs/*.log
+logs/*.log.*
 logs/*.txt
 logs/*.wav
 logs/*.mp3
