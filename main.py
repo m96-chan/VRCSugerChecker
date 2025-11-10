@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).parent / "submodules"))
 import parse_logs
 from discord.webhook import DiscordWebhook
 from screenshot.capture import ScreenshotCapture
+from audio.recorder import AudioRecorder
 
 # ロガー設定
 logger = logging.getLogger(__name__)
@@ -27,9 +28,11 @@ logger = logging.getLogger(__name__)
 # グローバル変数
 discord_webhook: Optional[DiscordWebhook] = None
 screenshot_capture: Optional[ScreenshotCapture] = None
+audio_recorder: Optional[AudioRecorder] = None
 config: Dict = {}
 last_instance_id: Optional[str] = None
 last_users: Dict[str, str] = {}
+last_world_name: Optional[str] = None
 
 
 def setup_logging(logs_dir: Path) -> None:
@@ -246,7 +249,7 @@ def start_log_monitoring():
     """
     ログ監視を開始
     """
-    global last_instance_id, last_users
+    global last_instance_id, last_users, last_world_name
 
     print("[動作開始] VRChatログの監視を開始します\n")
     try:
@@ -262,6 +265,11 @@ def start_log_monitoring():
         result = parse_logs.parse_vrchat_log(log_file)
         parse_logs.display_results(result)
 
+        # マイクデバイスを設定
+        if audio_recorder and result.get('microphone_device'):
+            audio_recorder.set_mic_device(result['microphone_device'])
+            logger.info(f"マイクデバイスを検出: {result['microphone_device']}")
+
         # Discord通知（インスタンス情報）
         if discord_webhook and config.get("discord", {}).get("notifications", {}).get("instance_info", False):
             if result['current_instance']:
@@ -275,6 +283,13 @@ def start_log_monitoring():
         # 現在の状態を記録
         last_instance_id = result['current_instance']
         last_users = result['users_in_instance'].copy()
+        last_world_name = result['current_world']
+
+        # Audio録音開始（ワールドに入っている場合）
+        if audio_recorder and config.get("audio", {}).get("enabled", False):
+            if config.get("audio", {}).get("auto_start", False) and result['current_world']:
+                world_id = result['current_world'] or "unknown"
+                audio_recorder.start_recording(world_id=world_id, instance_id=result['current_instance'])
 
         # スクリーンショット撮影（VRChat起動時）
         if screenshot_capture and config.get("screenshot", {}).get("enabled", False):
@@ -294,7 +309,7 @@ def update_log_monitoring():
     """
     ログ監視を更新（定期的に呼び出される）
     """
-    global last_instance_id, last_users
+    global last_instance_id, last_users, last_world_name
 
     try:
         # ログディレクトリを取得
@@ -308,6 +323,18 @@ def update_log_monitoring():
 
         current_instance = result['current_instance']
         current_users = result['users_in_instance']
+        current_world = result['current_world']
+
+        # マイクデバイスの更新
+        if audio_recorder and result.get('microphone_device'):
+            if audio_recorder.mic_device != result['microphone_device']:
+                audio_recorder.set_mic_device(result['microphone_device'])
+
+        # ワールド変更を検出（インスタンス変更またはワールド名変更）
+        world_changed = False
+        if current_world and current_world != last_world_name and last_world_name is not None:
+            world_changed = True
+            print(f"\n[検出] ワールド変更: {current_world}")
 
         # インスタンス変更を検出
         if current_instance and current_instance != last_instance_id and last_instance_id is not None:
@@ -318,7 +345,7 @@ def update_log_monitoring():
                 discord_webhook.send_instance_changed(
                     old_instance=last_instance_id,
                     new_instance=current_instance,
-                    world_name=result['current_world'] or "不明"
+                    world_name=current_world or "不明"
                 )
 
             # スクリーンショット撮影（インスタンス変更時）
@@ -326,8 +353,20 @@ def update_log_monitoring():
                 if config.get("screenshot", {}).get("on_instance_change", False):
                     screenshot_capture.capture_on_instance_change(
                         instance_id=current_instance,
-                        world_name=result['current_world'] or "不明"
+                        world_name=current_world or "不明"
                     )
+
+        # Audio録音の停止・開始（ワールド変更時）
+        if audio_recorder and config.get("audio", {}).get("enabled", False) and world_changed:
+            # 現在録音中なら停止
+            if audio_recorder.is_recording:
+                logger.info(f"ワールド変更検出: 録音を停止します")
+                audio_recorder.stop_recording()
+
+            # 新しいワールドで録音開始
+            if current_world:
+                logger.info(f"新しいワールドで録音を開始します: {current_world}")
+                audio_recorder.start_recording(world_id=current_world, instance_id=current_instance)
 
         # ユーザーの参加/退出を検出
         # 最初のログ監視開始時はlast_usersが空なので、通知を送らない
@@ -352,6 +391,7 @@ def update_log_monitoring():
         # 状態を更新
         last_instance_id = current_instance
         last_users = current_users.copy()
+        last_world_name = current_world
 
         # 簡易的な表示
         print(f"\r[更新] インスタンス: {current_instance or '不明'} | ユーザー数: {len(current_users)}人", end="", flush=True)
@@ -364,6 +404,11 @@ def stop_log_monitoring():
     """
     ログ監視を停止
     """
+    # Audio録音を停止
+    if audio_recorder and audio_recorder.is_recording:
+        if config.get("audio", {}).get("auto_stop", True):
+            audio_recorder.stop_recording()
+
     # スクリーンショット自動キャプチャを停止
     if screenshot_capture and screenshot_capture.is_auto_capture_running:
         screenshot_capture.stop_auto_capture()
@@ -373,7 +418,7 @@ def stop_log_monitoring():
 
 def main():
     """メイン処理"""
-    global discord_webhook, screenshot_capture, config
+    global discord_webhook, screenshot_capture, audio_recorder, config
 
     # コマンドライン引数のパース
     parser = argparse.ArgumentParser(description='VRChat Sugar Checker - VRChat.exeプロセス監視ツール')
@@ -411,6 +456,18 @@ def main():
             logger.warning("Discord通知が有効ですが、webhook_urlが設定されていません")
     else:
         logger.info("Discord通知は無効です")
+
+    # Audio録音の初期化
+    audio_config = config.get("audio", {})
+    if audio_config.get("enabled", False):
+        audio_recorder = AudioRecorder(logs_dir)
+        logger.info("Audio録音が有効になっています")
+
+        # 古い音声ファイルのクリーンアップ
+        retention_days = audio_config.get("retention_days", 7)
+        audio_recorder.cleanup_old_audio_files(days=retention_days)
+    else:
+        logger.info("Audio録音は無効です")
 
     # スクリーンショットキャプチャの初期化
     screenshot_config = config.get("screenshot", {})

@@ -85,6 +85,7 @@ def parse_vrchat_log(log_file: Path, verbose: bool = False) -> Dict:
     # 現在のインスタンス情報
     current_instance = None
     current_world = None
+    microphone_device = None
 
     # インスタンスにいるユーザー（join/leaveを追跡）
     users_in_instance = {}  # {display_name: user_id}
@@ -107,6 +108,10 @@ def parse_vrchat_log(log_file: Path, verbose: bool = False) -> Dict:
     # OnPlayerLeft DisplayName (usr_xxx)
     # 退出した人
     player_left_pattern = re.compile(r'OnPlayerLeft (.+?) \((usr_[a-f0-9\-]+)\)')
+
+    # Microphone device detection
+    # uSpeak: SetInputDevice 0 (11 total) 'マイク (Razer BlackShark V2 HS 2.4)'
+    microphone_pattern = re.compile(r"uSpeak: SetInputDevice \d+ \(\d+ total\) '(.+?)'")
 
     # ログの時刻を解析するパターン
     # 2025.11.09 02:32:03 Log        -  ...
@@ -187,9 +192,18 @@ def parse_vrchat_log(log_file: Path, verbose: bool = False) -> Dict:
                     time_str = f"[{timestamp_str}]" if timestamp_str else ""
                     print(f"  {time_str} [LEFT] {display_name} ({user_id})")
 
+            # Microphone device detection
+            match = microphone_pattern.search(line)
+            if match:
+                microphone_device = match.group(1).strip()
+                if verbose:
+                    time_str = f"[{timestamp_str}]" if timestamp_str else ""
+                    print(f"  {time_str} [MIC] {microphone_device}")
+
     return {
         'current_instance': current_instance,
         'current_world': current_world,
+        'microphone_device': microphone_device,
         'users_in_instance': users_in_instance,
         'join_events': join_events,
         'leave_events': leave_events

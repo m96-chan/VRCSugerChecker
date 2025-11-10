@@ -5,42 +5,48 @@ VRChatの音声を録音する機能
 
 要件:
 - 録音開始/停止機能
-- logsフォルダに保存
-- ファイル名にタイムスタンプを含める
-- 7日間の自動削除（main.pyのcleanup_old_logsで処理）
+- logs/audioフォルダに保存
+- ワールドIDベースのファイル名
+- システム音声とマイク音声の合成録音
+- m4a形式で録音
 """
 import logging
 import subprocess
 import threading
+import re
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 
 class AudioRecorder:
-    """Audio録音クラス"""
+    """Audio録音クラス（FFmpegベース）"""
 
-    def __init__(self, logs_dir: Path, device_name: Optional[str] = None):
+    def __init__(self, logs_dir: Path, mic_device: Optional[str] = None):
         """
         初期化
         Args:
-            logs_dir: ログディレクトリのパス
-            device_name: 録音デバイス名（Noneの場合はデフォルトデバイス）
+            logs_dir: ログディレクトリのパス（logs/audio配下に保存）
+            mic_device: マイクデバイス名
         """
         self.logs_dir = logs_dir
-        self.device_name = device_name
+        self.audio_dir = logs_dir / "audio"
+        self.audio_dir.mkdir(parents=True, exist_ok=True)
+
+        self.mic_device = mic_device
         self.is_recording = False
         self.recording_process: Optional[subprocess.Popen] = None
-        self.recording_thread: Optional[threading.Thread] = None
         self.current_file: Optional[Path] = None
+        self.current_world_id: Optional[str] = None
 
-    def start_recording(self, prefix: str = "vrchat_audio") -> bool:
+    def start_recording(self, world_id: str, instance_id: Optional[str] = None) -> bool:
         """
         録音を開始
         Args:
-            prefix: ファイル名のプレフィックス
+            world_id: ワールドID（wrld_xxxxx形式またはワールド名）
+            instance_id: インスタンスID（オプション）
         Returns:
             bool: 録音開始に成功した場合True
         """
@@ -49,23 +55,58 @@ class AudioRecorder:
             return False
 
         try:
-            # ファイル名を生成（タイムスタンプ付き）
+            # ワールドIDから安全なファイル名を生成
+            safe_world_id = self._sanitize_filename(world_id)
+
+            # タイムスタンプを生成
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"{prefix}_{timestamp}.wav"
-            self.current_file = self.logs_dir / filename
 
-            logger.info(f"録音を開始します: {self.current_file}")
+            # ファイル名: worldID-YYYYMMDD_HHMMSS.m4a
+            filename = f"{safe_world_id}-{timestamp}.m4a"
+            self.current_file = self.audio_dir / filename
+            self.current_world_id = world_id
 
-            # TODO: 録音の実装
-            # 以下は実装の骨格のみ
-            # 実際の録音にはpyaudio, sounddevice, または ffmpegなどを使用する必要があります
+            logger.info(f"録音を開始します: {filename}")
+
+            # マイクデバイス名を取得
+            if not self.mic_device:
+                logger.error("マイクデバイスが設定されていません")
+                return False
+
+            # FFmpegコマンドを構築
+            # -f dshow: DirectShow入力
+            # -i audio="device": オーディオデバイス指定
+            # -filter_complex amix: 複数音声ソースをミックス
+            # -c:a aac: AACコーデック（m4a用）
+            # -b:a 192k: ビットレート 192kbps
+            cmd = [
+                "ffmpeg",
+                "-f", "dshow",
+                "-i", f"audio=ステレオ ミキサー",  # システム音声
+                "-f", "dshow",
+                "-i", f"audio={self.mic_device}",  # マイク音声
+                "-filter_complex", "[0:a][1:a]amix=inputs=2:duration=longest:dropout_transition=2",
+                "-c:a", "aac",
+                "-b:a", "192k",
+                "-y",  # 上書き
+                str(self.current_file)
+            ]
+
+            # FFmpegプロセスを起動
+            self.recording_process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                stdin=subprocess.PIPE
+            )
 
             self.is_recording = True
-            logger.info("録音を開始しました")
+            logger.info(f"録音を開始しました: {filename}")
             return True
 
         except Exception as e:
             logger.error(f"録音の開始に失敗: {e}")
+            self.is_recording = False
             return False
 
     def stop_recording(self) -> bool:
@@ -74,22 +115,62 @@ class AudioRecorder:
         Returns:
             bool: 録音停止に成功した場合True
         """
-        if not self.is_recording:
+        if not self.is_recording or not self.recording_process:
             logger.warning("録音していません")
             return False
 
         try:
             logger.info("録音を停止します")
 
-            # TODO: 録音停止の実装
+            # FFmpegプロセスにqコマンド（正常終了）を送信
+            try:
+                self.recording_process.stdin.write(b'q')
+                self.recording_process.stdin.flush()
+            except:
+                pass
+
+            # プロセスの終了を待つ（最大5秒）
+            try:
+                self.recording_process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                # タイムアウトした場合は強制終了
+                self.recording_process.terminate()
+                self.recording_process.wait(timeout=2)
 
             self.is_recording = False
             logger.info(f"録音を停止しました: {self.current_file}")
+
+            # ファイルサイズを確認
+            if self.current_file and self.current_file.exists():
+                size_mb = self.current_file.stat().st_size / (1024 * 1024)
+                logger.info(f"録音ファイルサイズ: {size_mb:.2f} MB")
+
+            self.current_file = None
+            self.current_world_id = None
             return True
 
         except Exception as e:
             logger.error(f"録音の停止に失敗: {e}")
             return False
+
+    def _sanitize_filename(self, name: str) -> str:
+        """
+        ファイル名に使用できない文字を削除
+        Args:
+            name: 元のファイル名
+        Returns:
+            str: 安全なファイル名
+        """
+        # Windows/Linuxで使用できない文字を削除
+        name = re.sub(r'[<>:"/\\|?*]', '_', name)
+        # 連続するスペースを1つに
+        name = re.sub(r'\s+', '_', name)
+        # 先頭・末尾のスペースやドットを削除
+        name = name.strip(' .')
+        # 最大長を制限（200文字）
+        if len(name) > 200:
+            name = name[:200]
+        return name
 
     def get_audio_devices(self) -> list:
         """
@@ -102,23 +183,31 @@ class AudioRecorder:
         logger.info("オーディオデバイスのリスト取得機能は未実装です")
         return []
 
+    def set_mic_device(self, mic_device: str) -> None:
+        """
+        マイクデバイスを設定
+        Args:
+            mic_device: マイクデバイス名
+        """
+        self.mic_device = mic_device
+        logger.info(f"マイクデバイスを設定: {mic_device}")
+
     def cleanup_old_audio_files(self, days: int = 7) -> None:
         """
         古い音声ファイルを削除
         Args:
             days: 保持する日数
         """
-        from datetime import timedelta
-
-        if not self.logs_dir.exists():
+        if not self.audio_dir.exists():
             return
 
         cutoff_time = datetime.now() - timedelta(days=days)
 
         # 音声ファイルの拡張子
-        audio_extensions = ['.wav', '.mp3', '.ogg', '.flac']
+        audio_extensions = ['.m4a', '.wav', '.mp3', '.aac']
 
-        for audio_file in self.logs_dir.iterdir():
+        deleted_count = 0
+        for audio_file in self.audio_dir.iterdir():
             if audio_file.suffix.lower() not in audio_extensions:
                 continue
 
@@ -129,9 +218,13 @@ class AudioRecorder:
                 # カットオフ時間より古い場合は削除
                 if file_time < cutoff_time:
                     audio_file.unlink()
+                    deleted_count += 1
                     logger.info(f"古い音声ファイルを削除: {audio_file.name}")
             except Exception as e:
                 logger.error(f"音声ファイル削除中にエラー: {audio_file.name} - {e}")
+
+        if deleted_count > 0:
+            logger.info(f"古い音声ファイルを{deleted_count}個削除しました")
 
 
 # 使用例とドキュメント

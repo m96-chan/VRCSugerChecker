@@ -8,6 +8,7 @@ import json
 import logging
 from typing import Dict, List, Optional
 from datetime import datetime
+from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +116,9 @@ class DiscordWebhook:
         Returns:
             bool: 送信成功ならTrue
         """
+        # インスタンスリンクを生成
+        instance_link = self._create_instance_link(instance_id) if instance_id else None
+
         fields = [
             {
                 "name": "🌍 ワールド",
@@ -127,6 +131,14 @@ class DiscordWebhook:
                 "inline": False
             }
         ]
+
+        # インスタンスリンクを追加
+        if instance_link:
+            fields.append({
+                "name": "🔗 インスタンスリンク",
+                "value": f"[VRChatで開く]({instance_link})",
+                "inline": False
+            })
 
         # ユーザーリストを整形（リンク付き）
         # Discord fieldのvalue制限: 1024文字
@@ -280,28 +292,62 @@ class DiscordWebhook:
         Returns:
             bool: 送信成功ならTrue
         """
+        # インスタンスリンクを生成
+        instance_link = self._create_instance_link(new_instance) if new_instance else None
+
+        fields = [
+            {
+                "name": "🌍 ワールド",
+                "value": world_name or "不明",
+                "inline": False
+            },
+            {
+                "name": "📍 新しいインスタンス",
+                "value": f"```{new_instance or '不明'}```",
+                "inline": False
+            }
+        ]
+
+        # インスタンスリンクを追加
+        if instance_link:
+            fields.append({
+                "name": "🔗 インスタンスリンク",
+                "value": f"[VRChatで開く]({instance_link})",
+                "inline": False
+            })
+
         embed = {
             "title": "🔄 インスタンス変更",
             "description": f"新しいインスタンスに移動しました",
             "color": 0xf39c12,  # オレンジ色
-            "fields": [
-                {
-                    "name": "🌍 ワールド",
-                    "value": world_name or "不明",
-                    "inline": False
-                },
-                {
-                    "name": "📍 新しいインスタンス",
-                    "value": f"```{new_instance or '不明'}```",
-                    "inline": False
-                }
-            ],
+            "fields": fields,
             "timestamp": datetime.utcnow().isoformat(),
             "footer": {
                 "text": "VRChat Sugar Checker"
             }
         }
         return self.send(embed=embed)
+
+    def _create_instance_link(self, instance_id: str) -> Optional[str]:
+        """
+        VRChatインスタンスリンクを生成
+        Args:
+            instance_id: インスタンスID（例: wrld_xxx:12345~region(jp)~...）
+        Returns:
+            Optional[str]: VRChatで開けるリンク（生成できない場合はNone）
+        """
+        if not instance_id:
+            return None
+
+        try:
+            # インスタンスIDをURLエンコード
+            encoded_instance = quote(instance_id, safe='')
+            # VRChat起動リンク
+            # vrchat://launch?id=wrld_xxx:12345~...
+            return f"https://vrchat.com/home/launch?worldId={encoded_instance}"
+        except Exception as e:
+            logger.error(f"インスタンスリンクの生成に失敗: {e}")
+            return None
 
 
 def send_notification(webhook_url: str, message: str, title: str = None, color: int = 0x3498db) -> bool:

@@ -50,10 +50,17 @@ logs/*.txt
 logs/*.wav
 logs/*.mp3
 logs/*.ogg
+logs/*.m4a
+logs/*.aac
+logs/audio/*.m4a
+logs/audio/*.wav
+logs/audio/*.mp3
+logs/audio/*.aac
 logs/screenshots/*.png
 logs/screenshots/*.jpg
 logs/screenshots/*.jpeg
 !logs/.gitkeep
+!logs/audio/.gitkeep
 
 # Windows
 Thumbs.db
