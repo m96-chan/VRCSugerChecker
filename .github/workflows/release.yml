@@ -1,0 +1,158 @@
+name: Build and Release
+
+# 手動トリガー + タグプッシュでリリース
+on:
+  # 手動実行を有効化
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'リリースバージョン (例: v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+      prerelease:
+        description: 'プレリリースとして公開'
+        required: false
+        type: boolean
+        default: false
+
+  # タグがプッシュされた時も自動実行
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: Build Windows Executable
+    runs-on: windows-latest
+
+    steps:
+      # リポジトリをチェックアウト
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Python環境をセットアップ
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      # 依存関係をインストール
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # PyInstallerでビルド
+      - name: Build with PyInstaller
+        run: |
+          pyinstaller VRChatSugarChecker.spec
+
+      # 必要なファイルをdistフォルダにコピー
+      - name: Copy required files
+        run: |
+          if (-not (Test-Path "dist\logs")) { New-Item -ItemType Directory -Path "dist\logs" }
+          Copy-Item "logs\.gitkeep" "dist\logs\" -ErrorAction SilentlyContinue
+          Copy-Item "config.example.json" "dist\" -ErrorAction SilentlyContinue
+          Copy-Item "run_silent.vbs" "dist\" -ErrorAction SilentlyContinue
+          Copy-Item "install_startup.ps1" "dist\" -ErrorAction SilentlyContinue
+          Copy-Item "uninstall_startup.ps1" "dist\" -ErrorAction SilentlyContinue
+          Copy-Item "README.md" "dist\" -ErrorAction SilentlyContinue
+          Copy-Item "BUILD_GUIDE.md" "dist\" -ErrorAction SilentlyContinue
+          Copy-Item "AUDIO_RECORDING.md" "dist\" -ErrorAction SilentlyContinue
+        shell: powershell
+
+      # ZIPファイルを作成
+      - name: Create ZIP archive
+        run: |
+          Compress-Archive -Path "dist\*" -DestinationPath "VRChatSugarChecker.zip"
+        shell: powershell
+
+      # アーティファクトをアップロード（ダウンロード可能にする）
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: VRChatSugarChecker-Windows
+          path: VRChatSugarChecker.zip
+          retention-days: 90
+
+      # ビルド情報を出力
+      - name: Build info
+        run: |
+          echo "Build completed successfully!"
+          echo "Executable: dist\VRChatSugarChecker.exe"
+          echo "Archive: VRChatSugarChecker.zip"
+          Get-ChildItem dist
+        shell: powershell
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    # 手動実行またはタグプッシュの場合のみリリースを作成
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+
+    steps:
+      # ビルドされたアーティファクトをダウンロード
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: VRChatSugarChecker-Windows
+
+      # バージョン名を決定
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      # GitHubリリースを作成
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: VRChat Sugar Checker ${{ steps.version.outputs.version }}
+          body: |
+            ## VRChat Sugar Checker ${{ steps.version.outputs.version }}
+
+            VRChat.exeのプロセスを監視し、起動時にログ解析を開始するツールです。
+
+            ### 主な機能
+            - VRChat.exeの起動/終了を自動検出
+            - VRChatログファイルの自動解析
+            - Discord WebHook通知機能
+            - スクリーンショット自動撮影（インスタンス変更時・3分おき）
+            - バックグラウンドでサイレント実行
+            - Windowsスタートアップ登録機能
+
+            ### インストール方法
+            1. `VRChatSugarChecker.zip` をダウンロード
+            2. 任意のフォルダに解凍
+            3. `config.example.json` を `config.json` にコピー
+            4. `config.json` を編集して設定を変更
+            5. `VRChatSugarChecker.exe` を実行
+
+            ### バックグラウンド実行
+            - `run_silent.vbs` をダブルクリック
+
+            ### スタートアップ登録
+            - PowerShellで `install_startup.ps1` を実行
+
+            詳細は同梱の `README.md` を参照してください。
+
+            ### 注意事項
+            - このツールは非公式のサードパーティツールです
+            - VRChatの利用規約に違反しないよう注意してください
+            - 使用は自己責任でお願いします
+
+            ---
+
+            **ダウンロード:** VRChatSugarChecker.zip
+          files: VRChatSugarChecker.zip
+          draft: false
+          prerelease: ${{ github.event.inputs.prerelease == 'true' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
