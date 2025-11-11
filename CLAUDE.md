@@ -26,22 +26,26 @@ VRChat Sugar Checker is a Windows process monitoring tool that watches VRChat.ex
 
 ```bash
 # Run the application (must have access to Windows processes)
-python src/main.py
+uv run python main.py
 
 # Run with custom config
-python src/main.py --config config.json
+uv run python main.py --config config.json
 
 # Run with custom check interval
-python src/main.py --interval 10
+uv run python main.py --interval 10
 
 # Install dependencies
 uv sync
 # or
 pip install -r requirements.txt
 
-# Build executable
-./scripts/build.sh    # Linux/WSL
-scripts\build.bat     # Windows
+# Build C++ native extension (required first time and after C++ changes)
+build_native.bat      # Windows
+./build_native.bat    # WSL (calls Windows bat file)
+
+# Build complete application (includes native extension + executable)
+build.bat             # Windows
+./build.sh            # Linux/WSL
 ```
 
 ## Project Structure
@@ -55,11 +59,9 @@ VRCSugerChecker/
 │       ├── discord/              # Discord webhook notifications
 │       ├── screenshot/           # Screenshot capture
 │       └── audio/                # Audio recording
-├── scripts/                      # Build and deployment scripts
-│   ├── build.sh, build.bat       # Build scripts
-│   ├── run_silent.vbs            # Silent launcher
-│   ├── install_startup.ps1       # Startup installer
-│   └── uninstall_startup.ps1     # Startup uninstaller
+│           ├── recorder.py       # Main audio recorder
+│           ├── wasapi_process_loopback.py         # Pure Python WASAPI (fallback)
+│           └── wasapi_process_loopback_native.cpp # C++ native extension
 ├── build/                        # Build configuration
 │   └── VRChatSugarChecker.spec   # PyInstaller spec
 ├── docs/                         # Documentation
@@ -67,6 +69,12 @@ VRCSugerChecker/
 │   ├── BUILD_GUIDE.md
 │   └── RELEASE_GUIDE.md
 ├── logs/                         # Runtime logs and captures
+├── build_native.bat              # Build C++ native extension
+├── setup_native.py               # C++ extension build config
+├── build.bat, build.sh           # Complete build scripts
+├── run_silent.vbs                # Silent launcher
+├── install_startup.ps1           # Startup installer
+├── uninstall_startup.ps1         # Startup uninstaller
 ├── config.example.json           # Configuration template
 └── README.md, CLAUDE.md          # Project documentation
 ```
@@ -99,10 +107,14 @@ VRCSugerChecker/
    - Saves to `logs/screenshots/`
 
 5. **Audio Recorder** (`src/modules/audio/recorder.py`)
-   - Records audio using FFmpeg with DirectShow
-   - Mixes system audio (Stereo Mixer) and microphone input
-   - Outputs AAC-encoded m4a files
-   - Saves to `logs/audio/` with world ID in filename
+   - **VRChat Process-Specific Audio**: Uses C++ native WASAPI extension to capture ONLY VRChat audio
+   - **Fallback Options**: Pure Python WASAPI → PyAudioWPatch → System-wide capture
+   - **Native Extension**: `wasapi_process_loopback_native.cpp` compiled as Python module
+   - Implements Windows WASAPI `ActivateAudioInterfaceAsync` API with Process Loopback
+   - Requires Windows 10 Build 20438+ for process-specific capture
+   - Records microphone input separately using sounddevice
+   - Merges VRChat audio + microphone using FFmpeg
+   - Outputs to `logs/audio/` with world ID in filename
    - Automatically starts/stops based on world changes
 
 ### State Management
@@ -144,29 +156,74 @@ The tool detects WSL by checking for "microsoft" in `platform.release()` and con
 
 ## Build System
 
-The project uses PyInstaller to create standalone Windows executables:
+The project uses a two-stage build process:
+
+### Stage 1: C++ Native Extension
+
+**Required for VRChat-only audio capture**
 
 ```bash
-# Build using scripts (recommended)
-./scripts/build.sh    # Linux/WSL
-scripts\build.bat     # Windows
+# Build C++ extension
+build_native.bat      # Windows
+./build_native.bat    # WSL
+```
 
-# Manual build
+Requirements:
+- Visual Studio Build Tools 2022+ with C++ support
+- Windows SDK 10.0.22000.0+
+- Compiles to: `src/modules/audio/wasapi_process_loopback_native*.pyd`
+
+Build configuration: `setup_native.py`
+- Uses setuptools Extension
+- C++20 standard (`/std:c++20`)
+- Links: ole32, uuid, propsys
+- Implements IAgileObject for thread marshaling
+
+### Stage 2: PyInstaller Executable
+
+```bash
+# Complete build (native extension + executable)
+build.bat             # Windows
+./build.sh            # Linux/WSL
+
+# Manual PyInstaller build
 cd build
-pyinstaller VRChatSugarChecker.spec
+uv run pyinstaller VRChatSugarChecker.spec
 ```
 
 Build spec file: `build/VRChatSugarChecker.spec`
 - References source from `../src/main.py`
 - Includes modules from `../src/modules`
-- Output: `dist/VRChatSugarChecker.exe` with bundled dependencies
+- Bundles native extension (.pyd file)
+- Output: `dist/VRChatSugarChecker.exe` with all dependencies
+
+### Build Troubleshooting
+
+**Native extension build fails:**
+1. Install Visual Studio Build Tools
+2. Install Windows SDK
+3. Ensure MSVC compiler is in PATH
+
+**PyInstaller missing native extension:**
+1. Run `build_native.bat` first
+2. Verify .pyd file exists in `src/modules/audio/`
+3. Rebuild with `build.bat` or `build.sh`
 
 ## Deployment
 
-Windows startup integration (all in `scripts/` directory):
+Windows startup integration:
 - `install_startup.ps1`: Registers VBS script in Windows startup folder
-- `run_silent.vbs`: Launches Python script from `src/main.py` without console window
+- `run_silent.vbs`: Launches executable without console window
 - `uninstall_startup.ps1`: Removes startup registration
+
+Installation steps:
+```powershell
+# Build application
+.\build.bat
+
+# Install to startup
+powershell -ExecutionPolicy Bypass -File install_startup.ps1
+```
 
 ## Important Implementation Details
 
@@ -182,11 +239,16 @@ Instance changes are detected when the `Joining` pattern shows a new instance ID
 
 ### Audio Recording Flow
 
-1. Microphone device detected from VRChat logs (src/main.py:269-271)
-2. Recording starts when entering a world (if `auto_start` enabled)
-3. On world change: Stop current recording → Start new recording with new world ID
-4. FFmpeg command mixes stereo mixer + mic with `amix` filter (src/modules/audio/recorder.py:82-93)
-5. Recording stops on VRChat exit (if `auto_stop` enabled)
+1. **VRChat Process Detection**: Find VRChat.exe PID using pycaw AudioUtilities
+2. **Native Extension Initialization**: Create ProcessLoopback object with VRChat PID
+3. **Process-Specific Capture**:
+   - Try `ActivateAudioInterfaceAsync` with `AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK`
+   - Requires Windows 10 Build 20438+, STA thread, IAgileObject implementation
+   - Falls back to system-wide capture if fails
+4. **Microphone Recording**: Separate sounddevice recording of mic input
+5. **Audio Merging**: FFmpeg merges VRChat audio + mic with `amix` filter
+6. **File Output**: Saves as WAV to `logs/audio/{world_id}-{timestamp}_{vrchat|mic}.wav`
+7. **Cleanup**: Merges and deletes source files (unless `keep_source_files` is true)
 
 ### Screenshot Capture Timing
 
@@ -213,9 +275,21 @@ When testing or debugging:
 
 Core libraries (from `pyproject.toml`):
 - `requests`: Discord webhook HTTP requests
-- `pywin32`: Windows API access for process/window operations
+- `pywin32`: Windows API access, COM for audio session management
 - `pillow`: Image processing for screenshots
-- External: FFmpeg (not Python package) for audio recording
+- `sounddevice`, `soundfile`: Microphone recording
+- `numpy`: Audio data processing
+- `pycaw`: Windows Audio Session API (WASAPI) wrapper
+- `comtypes`: COM interface access for WASAPI
+- `pyaudiowpatch`: WASAPI loopback fallback (optional)
+
+Build dependencies:
+- Visual Studio Build Tools 2022+ (MSVC compiler)
+- Windows SDK 10.0.22000.0+
+- PyInstaller (for executable builds)
+
+External:
+- FFmpeg: Audio mixing and encoding (not Python package)
 
 ## Common Operations
 

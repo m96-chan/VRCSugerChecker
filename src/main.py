@@ -526,8 +526,12 @@ def main():
     # Audio録音の初期化
     audio_config = config.get("audio", {})
     if audio_config.get("enabled", False):
-        audio_recorder = AudioRecorder(logs_dir)
+        # デバッグ設定を取得
+        keep_source_files = audio_config.get("debug", {}).get("keep_source_files", False)
+        audio_recorder = AudioRecorder(logs_dir, keep_source_files=keep_source_files)
         logger.info("Audio録音が有効になっています")
+        if keep_source_files:
+            logger.info("デバッグモード: wavファイルを保持します")
 
         # 古い音声ファイルのクリーンアップ
         retention_days = audio_config.get("retention_days", 7)

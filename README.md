@@ -16,9 +16,11 @@ VRChatの活動を自動記録・通知するツールです。VRChatプレイ�
 - インスタンスリンク付きで簡単参加
 
 ### 🎙️ 音声録音
-- VRChatの音声を自動録音（システム音声 + マイク）
+- **VRChat専用音声録音**: C++ネイティブ拡張でVRChatの音声のみをキャプチャ
+- Discord等の他アプリの音声は含まれません
+- マイク音声も同時録音して自動ミックス
 - ワールド毎にファイル自動整理
-- m4a形式で高品質録音
+- WAV形式で高品質録音
 
 ### 📸 スクリーンショット
 - インスタンス変更時の自動撮影
@@ -33,9 +35,10 @@ VRChatの活動を自動記録・通知するツールです。VRChatプレイ�
 
 ## 動作環境
 
-- **OS**: Windows 10/11
-- **Python**: 3.13以上
+- **OS**: Windows 10/11 (Build 20438以上を推奨、プロセス固有の音声録音用)
+- **Python**: 3.13以上（開発版のみ）
 - **その他**: PowerShell、FFmpeg（音声録音を使う場合）
+- **開発環境**: Visual Studio Build Tools 2022+ (C++拡張のビルド用)
 
 ## インストール
 
@@ -68,7 +71,7 @@ VRChatの活動を自動記録・通知するツールです。VRChatプレイ�
 - USBメモリなどで持ち運び可能
 - 複数バージョンの併用が可能
 
-### 方法3: Python版（開発者向け）
+### 方法3: ソースからビルド（開発者向け）
 
 ```bash
 # リポジトリをクローン
@@ -76,13 +79,26 @@ git clone https://github.com/yourusername/VRCSugerChecker.git
 cd VRCSugerChecker
 
 # 依存関係をインストール
-pip install -r requirements.txt
-# または
 uv sync
 
-# 実行
-python src/main.py
+# C++ネイティブ拡張をビルド（初回のみ）
+build_native.bat
+
+# 実行可能ファイルをビルド
+build.bat           # Windows
+# または
+./build.sh          # Linux/WSL
+
+# 開発モードで直接実行
+uv run python main.py
 ```
+
+**ビルド要件:**
+- Visual Studio Build Tools 2022以上
+- Windows SDK 10.0.22000.0以上
+- C++コンパイラ (MSVC)
+
+詳細は [CLAUDE.md](CLAUDE.md) を参照してください。
 
 ## 設定方法
 

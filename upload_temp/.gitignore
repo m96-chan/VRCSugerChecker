@@ -1,0 +1,8 @@
+# Ignore all files in upload_temp directory
+*
+
+# Except this .gitignore file
+!.gitignore
+
+# Ignore all zip files specifically
+*.zip

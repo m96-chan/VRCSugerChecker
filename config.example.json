@@ -23,7 +23,10 @@
     "format": "wav",
     "auto_start": true,
     "auto_stop": true,
-    "retention_days": 7
+    "retention_days": 7,
+    "debug": {
+      "keep_source_files": false
+    }
   },
   "logs": {
     "retention_days": 7,

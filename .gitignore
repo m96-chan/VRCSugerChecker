@@ -27,6 +27,14 @@ build/dist/
 *.manifest
 *.exe.config
 
+# C++ Build artifacts
+build/temp.win-amd64-*/
+build/lib.win-amd64-*/
+*.exp
+*.lib
+*.obj
+*.pyd
+
 # Virtual Environment
 venv/
 ENV/
@@ -60,8 +68,10 @@ logs/audio/*.aac
 logs/screenshots/*.png
 logs/screenshots/*.jpg
 logs/screenshots/*.jpeg
+logs/upload_temp/*.zip
 !logs/.gitkeep
 !logs/audio/.gitkeep
+!logs/upload_temp/.gitkeep
 
 # Windows
 Thumbs.db
