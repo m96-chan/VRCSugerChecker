@@ -350,6 +350,57 @@ class DiscordWebhook:
             return None
 
 
+    def send_file_upload_complete(self, upload_results: list) -> bool:
+        """
+        ファイルアップロード完了通知を送信
+        Args:
+            upload_results: アップロード結果のリスト
+        Returns:
+            bool: 送信成功ならTrue
+        """
+        if not upload_results:
+            return False
+
+        # 合計サイズを計算
+        total_size_mb = sum(result.get('file_size_mb', 0) for result in upload_results)
+
+        fields = []
+
+        # 各ワールドのアップロード結果
+        for i, result in enumerate(upload_results, 1):
+            world_id = result.get('world_id', '不明')
+            link = result.get('link', '')
+            file_name = result.get('file_name', '')
+            file_size_mb = result.get('file_size_mb', 0)
+
+            # ワールドIDを短縮表示（長すぎる場合）
+            display_world_id = world_id if len(world_id) <= 30 else world_id[:27] + "..."
+
+            field_value = f"**ファイル名:** {file_name}\n"
+            field_value += f"**サイズ:** {file_size_mb:.2f} MB\n"
+            field_value += f"**ダウンロード:** [file.io]({link})\n"
+            field_value += f"**有効期限:** 1週間"
+
+            fields.append({
+                "name": f"📦 {i}. {display_world_id}",
+                "value": field_value,
+                "inline": False
+            })
+
+        embed = {
+            "title": "📤 ファイルアップロード完了",
+            "description": f"**{len(upload_results)}個**のアーカイブをアップロードしました\n合計サイズ: **{total_size_mb:.2f} MB**",
+            "color": 0x9b59b6,  # 紫色
+            "fields": fields,
+            "timestamp": datetime.utcnow().isoformat(),
+            "footer": {
+                "text": "VRChat Sugar Checker | file.io (1週間有効)"
+            }
+        }
+
+        return self.send(embed=embed)
+
+
 def send_notification(webhook_url: str, message: str, title: str = None, color: int = 0x3498db) -> bool:
     """
     シンプルな通知を送信（便利関数）

@@ -21,6 +21,7 @@ import parse_logs
 from discord.webhook import DiscordWebhook
 from screenshot.capture import ScreenshotCapture
 from audio.recorder import AudioRecorder
+from upload.uploader import FileUploader
 
 # ロガー設定
 logger = logging.getLogger(__name__)
@@ -29,10 +30,12 @@ logger = logging.getLogger(__name__)
 discord_webhook: Optional[DiscordWebhook] = None
 screenshot_capture: Optional[ScreenshotCapture] = None
 audio_recorder: Optional[AudioRecorder] = None
+file_uploader: Optional[FileUploader] = None
 config: Dict = {}
 last_instance_id: Optional[str] = None
 last_users: Dict[str, str] = {}
 last_world_name: Optional[str] = None
+last_upload_date: Optional[str] = None  # 最後のアップロード日（YYYYMMDD形式）
 
 
 def setup_logging(logs_dir: Path) -> None:
@@ -184,7 +187,7 @@ def monitor_vrchat_process(check_interval=5):
     Args:
         check_interval: プロセスチェックの間隔（秒）
     """
-    global last_instance_id, last_users
+    global last_instance_id, last_users, last_upload_date
 
     print("="*60)
     print("VRChat Sugar Checker 起動")
@@ -194,10 +197,21 @@ def monitor_vrchat_process(check_interval=5):
 
     vrchat_was_running = False
     log_monitoring_active = False
+    last_daily_check = datetime.now().date()
 
     try:
         while True:
             vrchat_is_running = is_vrchat_running()
+
+            # 日次チェック（日をまたいだ場合のアップロード）
+            current_date = datetime.now().date()
+            if current_date > last_daily_check:
+                last_daily_check = current_date
+                upload_config = config.get("upload", {})
+                if upload_config.get("enabled", False) and upload_config.get("daily_upload", True):
+                    if file_uploader and file_uploader.should_upload_daily(last_upload_date):
+                        logger.info("Daily upload triggered (date changed)")
+                        upload_files_to_cloud()
 
             # VRChatが起動した場合
             if vrchat_is_running and not vrchat_was_running:
@@ -224,6 +238,12 @@ def monitor_vrchat_process(check_interval=5):
                     discord_webhook.send_vrchat_stopped()
 
                 stop_log_monitoring()
+
+                # ファイルアップロード（VRChat終了時）
+                upload_config = config.get("upload", {})
+                if upload_config.get("enabled", False) and upload_config.get("upload_on_exit", True):
+                    upload_files_to_cloud()
+
                 print(f"\nVRChat.exeの起動を監視中... ({check_interval}秒間隔)")
 
                 # リセット
@@ -416,9 +436,48 @@ def stop_log_monitoring():
     print("[動作停止] VRChatログの監視を停止しました")
 
 
+def upload_files_to_cloud():
+    """
+    ファイルをクラウドにアップロード
+    """
+    global last_upload_date
+
+    if not file_uploader:
+        logger.warning("File uploader is not initialized")
+        return
+
+    upload_config = config.get("upload", {})
+    if not upload_config.get("enabled", False):
+        logger.info("File upload is disabled")
+        return
+
+    logger.info("Starting file upload process...")
+    print("\n[アップロード] ファイルをfile.ioにアップロード中...")
+
+    # アップロード処理
+    expires = upload_config.get("expires", "1w")
+    cleanup = upload_config.get("cleanup_after_upload", True)
+
+    upload_results = file_uploader.process_and_upload_all(expires=expires, cleanup=cleanup)
+
+    if upload_results:
+        logger.info(f"Successfully uploaded {len(upload_results)} files")
+        print(f"[完了] {len(upload_results)}個のファイルをアップロードしました")
+
+        # Discord通知
+        if discord_webhook and upload_config.get("notify_discord", True):
+            discord_webhook.send_file_upload_complete(upload_results)
+
+        # 最後のアップロード日を記録
+        last_upload_date = datetime.now().strftime("%Y%m%d")
+    else:
+        logger.info("No files to upload or upload failed")
+        print("[情報] アップロードするファイルがありませんでした")
+
+
 def main():
     """メイン処理"""
-    global discord_webhook, screenshot_capture, audio_recorder, config
+    global discord_webhook, screenshot_capture, audio_recorder, file_uploader, config
 
     # コマンドライン引数のパース
     parser = argparse.ArgumentParser(description='VRChat Sugar Checker - VRChat.exeプロセス監視ツール')
@@ -427,7 +486,7 @@ def main():
     args = parser.parse_args()
 
     # ログディレクトリのパス
-    logs_dir = Path(__file__).parent / "logs"
+    logs_dir = Path(__file__).parent.parent / "logs"
 
     # ログ設定のセットアップ
     setup_logging(logs_dir)
@@ -480,6 +539,14 @@ def main():
         screenshot_capture.cleanup_old_screenshots(days=retention_days)
     else:
         logger.info("スクリーンショット撮影は無効です")
+
+    # ファイルアップローダーの初期化
+    upload_config = config.get("upload", {})
+    if upload_config.get("enabled", False):
+        file_uploader = FileUploader(logs_dir)
+        logger.info("ファイルアップロードが有効になっています")
+    else:
+        logger.info("ファイルアップロードは無効です")
 
     # プロセスチェック間隔
     check_interval = args.interval if args.interval else config.get("monitoring", {}).get("check_interval", 5)
