@@ -49,16 +49,14 @@ jobs:
           cd build
           pyinstaller VRChatSugarChecker.spec
           cd ..
-          # ビルド結果を dist に移動
-          if (Test-Path "build\dist\VRChatSugarChecker.exe") {
-            Copy-Item "build\dist\VRChatSugarChecker.exe" "dist\" -Force
-          }
         shell: powershell
 
       # 必要なファイルをdistフォルダにコピー
       - name: Copy required files
         run: |
           if (-not (Test-Path "dist")) { New-Item -ItemType Directory -Path "dist" }
+          # PyInstallerのビルド結果をコピー
+          Copy-Item "build\dist\VRChatSugarChecker.exe" "dist\" -Force
           if (-not (Test-Path "dist\logs")) { New-Item -ItemType Directory -Path "dist\logs" }
           if (-not (Test-Path "dist\logs\audio")) { New-Item -ItemType Directory -Path "dist\logs\audio" }
           if (-not (Test-Path "dist\logs\screenshots")) { New-Item -ItemType Directory -Path "dist\logs\screenshots" }
