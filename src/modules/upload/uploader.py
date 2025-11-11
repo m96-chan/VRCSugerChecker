@@ -42,7 +42,7 @@ class FileUploader:
 
     def organize_files_by_world(self) -> Dict[str, List[Path]]:
         """
-        音声ファイルとスクリーンショットをワールド毎に整理
+        音声ファイル、スクリーンショット、ログファイルをワールド毎に整理
         Returns:
             Dict[world_id, [file_paths]]: ワールドID毎のファイルリスト
         """
@@ -68,6 +68,12 @@ class FileUploader:
                 else:
                     # マッチしない場合は "screenshots" グループに入れる
                     world_files["screenshots"].append(screenshot)
+
+        # ログファイルを整理（すべてのアーカイブに含める）
+        log_files = self._get_log_files()
+        if log_files:
+            # "logs" グループに全ログファイルを追加
+            world_files["logs"] = log_files
 
         return dict(world_files)
 
@@ -124,6 +130,28 @@ class FileUploader:
                             continue
 
         return None
+
+    def _get_log_files(self) -> List[Path]:
+        """
+        アップロード対象のログファイルを取得
+        Returns:
+            List[Path]: ログファイルのリスト
+        """
+        log_files = []
+
+        # .logファイルを検索（ローテーション済みログも含む）
+        # 例: vrchat_checker.log, vrchat_checker.log.20231111
+        if self.logs_dir.exists():
+            for log_file in self.logs_dir.glob("*.log*"):
+                # .gitkeepは除外
+                if log_file.name == ".gitkeep":
+                    continue
+                # ディレクトリは除外
+                if log_file.is_file():
+                    log_files.append(log_file)
+
+        logger.info(f"Found {len(log_files)} log files to include in upload")
+        return log_files
 
     def create_world_archives(
         self, world_files: Dict[str, List[Path]], date_str: Optional[str] = None
@@ -279,13 +307,18 @@ class FileUploader:
         self, world_files: Dict[str, List[Path]], archives: List[Tuple[str, Path]]
     ) -> None:
         """
-        アップロード済みファイルを削除
+        アップロード済みファイルを削除（ログファイルは除外）
         Args:
             world_files: ワールド毎のファイル辞書
             archives: アーカイブのリスト
         """
-        # 元のファイルを削除
-        for files in world_files.values():
+        # 元のファイルを削除（ログファイルは除外）
+        for world_id, files in world_files.items():
+            # "logs" グループのファイルは削除しない
+            if world_id == "logs":
+                logger.info(f"Skipping deletion of {len(files)} log files")
+                continue
+
             for file in files:
                 try:
                     file.unlink()
