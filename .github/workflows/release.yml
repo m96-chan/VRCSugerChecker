@@ -20,6 +20,11 @@ on:
     tags:
       - 'v*'
 
+# GitHub Actionsの権限設定
+permissions:
+  contents: write
+  packages: write
+
 jobs:
   build:
     name: Build Windows Executable
@@ -190,8 +195,8 @@ jobs:
             - インストーラー版（推奨）: `VRChatSugarChecker_Setup_xxx.exe`
             - ZIP版（ポータブル）: `VRChatSugarChecker.zip`
           files: |
-            VRChatSugarChecker-Installer/VRChatSugarChecker_Setup_*.exe
-            VRChatSugarChecker-ZIP/VRChatSugarChecker.zip
+            VRChatSugarChecker_Setup_*.exe
+            VRChatSugarChecker.zip
           draft: false
           prerelease: ${{ github.event.inputs.prerelease == 'true' }}
         env:
