@@ -3,18 +3,25 @@
 VRChat Sugar Checker - PyInstaller設定ファイル
 """
 
+import os
+from pathlib import Path
+
+# プロジェクトルートディレクトリ
+SPEC_DIR = Path(SPECPATH)
+ROOT_DIR = SPEC_DIR.parent
+
 block_cipher = None
 
 # 分析: 必要なファイルとモジュールを収集
 a = Analysis(
-    ['../src/main.py'],
+    [str(ROOT_DIR / 'src' / 'main.py')],
     pathex=[],
     binaries=[],
     datas=[
         # 設定ファイルのサンプルを含める
-        ('../config.example.json', '.'),
+        (str(ROOT_DIR / 'config.example.json'), '.'),
         # modulesフォルダを含める
-        ('../src/modules', 'modules'),
+        (str(ROOT_DIR / 'src' / 'modules'), 'modules'),
     ],
     hiddenimports=[
         'requests',
@@ -33,7 +40,7 @@ a = Analysis(
 # PYZアーカイブの作成
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
-# 実行ファイルの作成
+# 実行ファイルの作成（onefileモード）
 exe = EXE(
     pyz,
     a.scripts,
@@ -56,4 +63,6 @@ exe = EXE(
     entitlements_file=None,
     # アイコンファイル（オプション）
     # icon='icon.ico',
+    # プロジェクトルートのdistフォルダに出力
+    distpath=str(ROOT_DIR / 'dist'),
 )
