@@ -7,14 +7,14 @@ block_cipher = None
 
 # 分析: 必要なファイルとモジュールを収集
 a = Analysis(
-    ['main.py'],
+    ['../src/main.py'],
     pathex=[],
     binaries=[],
     datas=[
         # 設定ファイルのサンプルを含める
-        ('config.example.json', '.'),
-        # submodulesフォルダを含める
-        ('submodules', 'submodules'),
+        ('../config.example.json', '.'),
+        # modulesフォルダを含める
+        ('../src/modules', 'modules'),
     ],
     hiddenimports=[
         'requests',

@@ -9,6 +9,9 @@ echo "VRChat Sugar Checker - ビルド開始"
 echo "========================================"
 echo ""
 
+# プロジェクトルートに移動
+cd "$(dirname "$0")/.."
+
 # 依存関係のインストール確認
 echo "[1/4] 依存関係を確認中..."
 python3 -m pip install -r requirements.txt
@@ -16,13 +19,15 @@ echo ""
 
 # 古いビルドファイルを削除
 echo "[2/4] 古いビルドファイルを削除中..."
-rm -rf build dist
+rm -rf build/build build/dist dist
 echo ""
 
 # PyInstallerでビルド
 echo "[3/4] PyInstallerでビルド中..."
 echo "この処理には数分かかる場合があります..."
+cd build
 python3 -m PyInstaller VRChatSugarChecker.spec
+cd ..
 echo ""
 
 # 必要なファイルをdistフォルダにコピー
@@ -30,9 +35,9 @@ echo "[4/4] 必要なファイルをコピー中..."
 mkdir -p dist/logs
 cp logs/.gitkeep dist/logs/ 2>/dev/null || true
 cp config.example.json dist/ 2>/dev/null || true
-cp run_silent.vbs dist/ 2>/dev/null || true
-cp install_startup.ps1 dist/ 2>/dev/null || true
-cp uninstall_startup.ps1 dist/ 2>/dev/null || true
+cp scripts/run_silent.vbs dist/ 2>/dev/null || true
+cp scripts/install_startup.ps1 dist/ 2>/dev/null || true
+cp scripts/uninstall_startup.ps1 dist/ 2>/dev/null || true
 cp README.md dist/ 2>/dev/null || true
 echo ""
 

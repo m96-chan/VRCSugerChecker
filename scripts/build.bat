@@ -2,6 +2,9 @@
 REM VRChat Sugar Checker - ビルドスクリプト (Windows)
 REM このスクリプトを実行すると、実行ファイル (.exe) が生成されます
 
+REM プロジェクトルートに移動
+cd /d "%~dp0\.."
+
 echo ========================================
 echo VRChat Sugar Checker - ビルド開始
 echo ========================================
@@ -19,19 +22,22 @@ echo.
 
 REM 古いビルドファイルを削除
 echo [2/4] 古いビルドファイルを削除中...
-if exist "build" rmdir /s /q "build"
+if exist "build\build" rmdir /s /q "build\build"
+if exist "build\dist" rmdir /s /q "build\dist"
 if exist "dist" rmdir /s /q "dist"
 echo.
 
 REM PyInstallerでビルド
 echo [3/4] PyInstallerでビルド中...
 echo この処理には数分かかる場合があります...
+cd build
 python -m PyInstaller VRChatSugarChecker.spec
 if errorlevel 1 (
     echo エラー: ビルドに失敗しました
     pause
     exit /b 1
 )
+cd ..
 echo.
 
 REM 必要なファイルをdistフォルダにコピー
@@ -39,9 +45,9 @@ echo [4/4] 必要なファイルをコピー中...
 if not exist "dist\logs" mkdir "dist\logs"
 copy "logs\.gitkeep" "dist\logs\" >nul 2>&1
 copy "config.example.json" "dist\" >nul 2>&1
-copy "run_silent.vbs" "dist\" >nul 2>&1
-copy "install_startup.ps1" "dist\" >nul 2>&1
-copy "uninstall_startup.ps1" "dist\" >nul 2>&1
+copy "scripts\run_silent.vbs" "dist\" >nul 2>&1
+copy "scripts\install_startup.ps1" "dist\" >nul 2>&1
+copy "scripts\uninstall_startup.ps1" "dist\" >nul 2>&1
 copy "README.md" "dist\" >nul 2>&1
 echo.
 

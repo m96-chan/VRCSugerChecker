@@ -14,9 +14,9 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict
 from logging.handlers import TimedRotatingFileHandler
 
-# submodulesのparse_logs.pyをインポート
-sys.path.insert(0, str(Path(__file__).parent / "submodules" / "vrc"))
-sys.path.insert(0, str(Path(__file__).parent / "submodules"))
+# modulesのparse_logs.pyをインポート
+sys.path.insert(0, str(Path(__file__).parent / "modules" / "vrc"))
+sys.path.insert(0, str(Path(__file__).parent / "modules"))
 import parse_logs
 from discord.webhook import DiscordWebhook
 from screenshot.capture import ScreenshotCapture

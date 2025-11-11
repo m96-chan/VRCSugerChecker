@@ -16,48 +16,79 @@ VRChat Sugar Checker is a Windows process monitoring tool that watches VRChat.ex
 
 ```bash
 # Run the application (must have access to Windows processes)
-python main.py
+python src/main.py
 
 # Run with custom config
-python main.py --config config.json
+python src/main.py --config config.json
 
 # Run with custom check interval
-python main.py --interval 10
+python src/main.py --interval 10
 
 # Install dependencies
 uv sync
 # or
 pip install -r requirements.txt
+
+# Build executable
+./scripts/build.sh    # Linux/WSL
+scripts\build.bat     # Windows
+```
+
+## Project Structure
+
+```
+VRCSugerChecker/
+├── src/                          # Source code
+│   ├── main.py                   # Main entry point
+│   └── modules/                  # Feature modules
+│       ├── vrc/                  # VRChat log parsing
+│       ├── discord/              # Discord webhook notifications
+│       ├── screenshot/           # Screenshot capture
+│       └── audio/                # Audio recording
+├── scripts/                      # Build and deployment scripts
+│   ├── build.sh, build.bat       # Build scripts
+│   ├── run_silent.vbs            # Silent launcher
+│   ├── install_startup.ps1       # Startup installer
+│   └── uninstall_startup.ps1     # Startup uninstaller
+├── build/                        # Build configuration
+│   └── VRChatSugarChecker.spec   # PyInstaller spec
+├── docs/                         # Documentation
+│   ├── AUDIO_RECORDING.md
+│   ├── BUILD_GUIDE.md
+│   └── RELEASE_GUIDE.md
+├── logs/                         # Runtime logs and captures
+├── config.example.json           # Configuration template
+└── README.md, CLAUDE.md          # Project documentation
 ```
 
 ## Architecture Overview
 
 ### Core Components
 
-1. **Process Monitor** (`main.py:181-246`)
+1. **Process Monitor** (`src/main.py:181-246`)
    - Monitors VRChat.exe using PowerShell commands
    - Detects VRChat start/stop events
    - Triggers log monitoring when VRChat is running
    - Main loop in `monitor_vrchat_process()` function
 
-2. **Log Parser** (`submodules/vrc/parse_logs.py`)
+2. **Log Parser** (`src/modules/vrc/parse_logs.py`)
    - Parses VRChat log files from `AppData/LocalLow/VRChat/VRChat`
    - Extracts instance IDs, world names, and user join/leave events
    - Patterns: `OnPlayerJoined`, `OnPlayerLeft`, `Entering Room`, `Joining`
-   - Detects microphone device from VRChat logs (main.py:269-271)
+   - Detects microphone device from VRChat logs (src/main.py:269-271)
 
-3. **Discord Notifier** (`submodules/discord/webhook.py`)
+3. **Discord Notifier** (`src/modules/discord/webhook.py`)
    - Sends Discord webhook notifications for events
    - Features user profile links and instance launch links
    - Handles Discord field length limits by splitting user lists
 
-4. **Screenshot Capture** (`submodules/screenshot/capture.py`)
+4. **Screenshot Capture** (`src/modules/screenshot/capture.py`)
    - Captures VRChat window using Win32 API or PowerShell fallback
    - Supports auto-capture at intervals (default: 3 minutes)
    - Captures on instance change with 2-second delay for loading
    - Saves to `logs/screenshots/`
 
-5. **Audio Recorder** (`submodules/audio/recorder.py`)
+5. **Audio Recorder** (`src/modules/audio/recorder.py`)
    - Records audio using FFmpeg with DirectShow
    - Mixes system audio (Stereo Mixer) and microphone input
    - Outputs AAC-encoded m4a files
@@ -66,7 +97,7 @@ pip install -r requirements.txt
 
 ### State Management
 
-Global state tracking in `main.py`:
+Global state tracking in `src/main.py`:
 - `last_instance_id`: Tracks current VRChat instance
 - `last_users`: Dict of users in current instance (display_name → user_id)
 - `last_world_name`: Current world name for change detection
@@ -90,8 +121,8 @@ Settings are accessed via nested dict gets: `config.get("discord", {}).get("noti
 
 ### File Management
 
-- **Log rotation**: 7-day rotation using `TimedRotatingFileHandler` (main.py:38-83)
-- **Cleanup**: Old logs/audio/screenshots deleted on startup (main.py:86-112)
+- **Log rotation**: 7-day rotation using `TimedRotatingFileHandler` (src/main.py:38-83)
+- **Cleanup**: Old logs/audio/screenshots deleted on startup (src/main.py:86-112)
 - **Paths**: All logs stored under `logs/` directory with subdirs for audio and screenshots
 
 ## WSL Environment Handling
@@ -107,21 +138,24 @@ The project uses PyInstaller to create standalone Windows executables:
 
 ```bash
 # Build using scripts (recommended)
-./build.sh    # Linux/WSL
-build.bat     # Windows
+./scripts/build.sh    # Linux/WSL
+scripts\build.bat     # Windows
 
 # Manual build
+cd build
 pyinstaller VRChatSugarChecker.spec
 ```
 
-Build spec file: `VRChatSugarChecker.spec`
-Output: `dist/VRChatSugarChecker.exe` with bundled dependencies
+Build spec file: `build/VRChatSugarChecker.spec`
+- References source from `../src/main.py`
+- Includes modules from `../src/modules`
+- Output: `dist/VRChatSugarChecker.exe` with bundled dependencies
 
 ## Deployment
 
-Windows startup integration:
+Windows startup integration (all in `scripts/` directory):
 - `install_startup.ps1`: Registers VBS script in Windows startup folder
-- `run_silent.vbs`: Launches Python script without console window
+- `run_silent.vbs`: Launches Python script from `src/main.py` without console window
 - `uninstall_startup.ps1`: Removes startup registration
 
 ## Important Implementation Details
@@ -129,7 +163,7 @@ Windows startup integration:
 ### VRChat Log Parsing
 
 The log parser maintains user state by:
-1. Clearing user list on instance change (parse_logs.py:143-151)
+1. Clearing user list on instance change (src/modules/vrc/parse_logs.py:143-151)
 2. Adding users on `OnPlayerJoined` events
 3. Removing users on `OnPlayerLeft` events
 4. Timestamp extraction for event ordering
@@ -138,21 +172,21 @@ Instance changes are detected when the `Joining` pattern shows a new instance ID
 
 ### Audio Recording Flow
 
-1. Microphone device detected from VRChat logs (main.py:269-271)
+1. Microphone device detected from VRChat logs (src/main.py:269-271)
 2. Recording starts when entering a world (if `auto_start` enabled)
 3. On world change: Stop current recording → Start new recording with new world ID
-4. FFmpeg command mixes stereo mixer + mic with `amix` filter (recorder.py:82-93)
+4. FFmpeg command mixes stereo mixer + mic with `amix` filter (src/modules/audio/recorder.py:82-93)
 5. Recording stops on VRChat exit (if `auto_stop` enabled)
 
 ### Screenshot Capture Timing
 
-- **Instance change**: 2-second delay to allow world loading (capture.py:303)
+- **Instance change**: 2-second delay to allow world loading (src/modules/screenshot/capture.py:303)
 - **Auto-capture**: Runs in background thread with configurable interval
 - **VRChat start**: Immediate capture if enabled
 
 ### Discord Webhook Considerations
 
-- User lists split into multiple fields if >900 chars (webhook.py:161-215)
+- User lists split into multiple fields if >900 chars (src/modules/discord/webhook.py:161-215)
 - Instance links use `https://vrchat.com/home/launch?worldId=` with URL encoding
 - All notifications include UTC timestamps and consistent footer
 
@@ -177,10 +211,10 @@ Core libraries (from `pyproject.toml`):
 
 ### Adding New Event Types
 
-1. Add regex pattern in `parse_logs.py`
+1. Add regex pattern in `src/modules/vrc/parse_logs.py`
 2. Add event detection in log parsing loop
-3. Add Discord webhook method in `webhook.py`
-4. Call webhook method from `main.py` monitoring functions
+3. Add Discord webhook method in `src/modules/discord/webhook.py`
+4. Call webhook method from `src/main.py` monitoring functions
 
 ### Modifying Notification Settings
 

@@ -4,11 +4,12 @@
 Set objShell = CreateObject("WScript.Shell")
 Set objFSO = CreateObject("Scripting.FileSystemObject")
 
-' このVBSファイルのディレクトリを取得
+' このVBSファイルのディレクトリを取得（scriptsフォルダ）
 strScriptPath = objFSO.GetParentFolderName(WScript.ScriptFullName)
 
-' Pythonスクリプトのパス
-strPythonScript = strScriptPath & "\main.py"
+' プロジェクトルートに移動してPythonスクリプトのパスを取得
+strProjectRoot = objFSO.GetParentFolderName(strScriptPath)
+strPythonScript = strProjectRoot & "\src\main.py"
 
 ' Pythonの実行パスを取得（複数の場所を試行）
 strPythonExe = ""
