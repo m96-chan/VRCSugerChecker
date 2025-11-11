@@ -1,33 +1,44 @@
 # VRChat Sugar Checker - ビルドガイド
 
-PyInstallerを使用してPythonコードを実行ファイル (.exe) に変換する方法を説明します。
+PyInstallerとInno Setupを使用して、実行ファイル (.exe) とインストーラーを作成する方法を説明します。
 
 ## 前提条件
 
-- Python 3.7以上がインストールされていること
-- Windows環境（WSLでも可能）
+### 必須
+- Python 3.13以上がインストールされていること
+- Windows環境（WSLでも可能、ただしインストーラー作成はWindowsのみ）
+
+### オプション（インストーラー作成時）
+- [Inno Setup 6](https://jrsoftware.org/isinfo.php) がインストールされていること
 
 ## ビルド手順
 
 ### 方法1: ビルドスクリプトを使用（推奨）
 
-#### Windows の場合
+#### 実行ファイル (.exe) のみ作成
+
+**Windows の場合:**
+```cmd
+scripts\build.bat
+```
+
+**Linux/WSL の場合:**
+```bash
+./scripts/build.sh
+```
+
+#### インストーラーも作成（Windowsのみ）
 
 ```cmd
-build.bat
+scripts\build_installer.bat
 ```
 
-#### Linux/WSL の場合
-
-```bash
-./build.sh
-```
-
-ビルドスクリプトは以下を自動的に実行します：
+このスクリプトは以下を自動的に実行します：
 1. 依存関係のインストール
 2. 古いビルドファイルの削除
 3. PyInstallerでのビルド
 4. 必要なファイルのコピー
+5. Inno Setupでインストーラー作成
 
 ### 方法2: 手動でビルド
 
@@ -60,6 +71,8 @@ cp README.md dist/
 
 ## ビルド結果
 
+### 実行ファイル版
+
 ビルドが完了すると、`dist` フォルダに以下のファイルが生成されます：
 
 ```
@@ -70,13 +83,37 @@ dist/
 ├── install_startup.ps1         # スタートアップ登録スクリプト
 ├── uninstall_startup.ps1       # スタートアップ削除スクリプト
 ├── README.md                   # 使い方ドキュメント
+├── DEVELOPMENT.md              # 開発者向けドキュメント
+├── BUILD_GUIDE.md              # ビルドガイド
+├── AUDIO_RECORDING.md          # 音声録音ガイド
 └── logs/                       # ログフォルダ
     └── .gitkeep
 ```
 
+### インストーラー版
+
+インストーラーをビルドした場合、以下のファイルが生成されます：
+
+```
+dist/
+├── VRChatSugarChecker_Setup_1.0.0.exe  # Windowsインストーラー
+└── （上記の実行ファイル版のファイル一式）
+```
+
 ## 配布方法
 
-### 配布パッケージの作成
+### 方法1: インストーラー版（推奨）
+
+1. `dist/VRChatSugarChecker_Setup_*.exe` をユーザーに配布
+2. ユーザーはインストーラーを実行するだけ
+
+**メリット:**
+- ユーザーが簡単にインストールできる
+- スタートアップ登録が自動
+- アンインストールも簡単
+- 設定ファイルの自動作成
+
+### 方法2: ZIP版（ポータブル）
 
 1. `dist` フォルダの内容をすべてZIPファイルにまとめる
 
@@ -92,13 +129,24 @@ zip -r ../VRChatSugarChecker.zip *
 
 2. ZIPファイルをユーザーに配布
 
+**メリット:**
+- インストール不要
+- USBメモリで持ち運び可能
+- 複数バージョンの併用が可能
+
 ### ユーザーへの使用方法
 
-配布されたZIPファイルを解凍後：
+#### インストーラー版の場合
+1. `VRChatSugarChecker_Setup_*.exe` を実行
+2. インストール時のオプションを選択（デスクトップアイコン、スタートアップ登録など）
+3. インストール完了後、設定ファイルが自動作成される
+4. `config.json` を編集して設定を変更
 
-1. `config.example.json` を `config.json` にコピー
-2. `config.json` を編集して設定を変更
-3. `VRChatSugarChecker.exe` を実行
+#### ZIP版の場合
+1. ZIPファイルを解凍
+2. `config.example.json` を `config.json` にコピー
+3. `config.json` を編集して設定を変更
+4. `VRChatSugarChecker.exe` を実行
 
 ## ビルドのカスタマイズ
 

@@ -39,15 +39,36 @@ VRChatの活動を自動記録・通知するツールです。VRChatプレイ�
 
 ## インストール
 
-### 1. 実行ファイル版（推奨）
+### 方法1: インストーラー版（推奨）
 
-1. [Releases](../../releases) から最新版をダウンロード
-2. ZIPファイルを解凍
+1. [Releases](../../releases) から最新の `VRChatSugarChecker_Setup_*.exe` をダウンロード
+2. インストーラーを実行
+3. インストール時のオプション選択:
+   - ✅ **デスクトップアイコン**: デスクトップにショートカットを作成
+   - ✅ **Windows起動時に自動実行**: バックグラウンドで常駐（推奨）
+4. インストール完了後、設定ファイルが自動作成されます
+5. インストールフォルダの `config.json` を編集して設定を変更
+
+**メリット:**
+- 簡単インストール・アンインストール
+- スタートアップ登録が自動
+- スタートメニューに登録
+- 設定ファイルの自動作成
+
+### 方法2: ZIP版（ポータブル）
+
+1. [Releases](../../releases) から最新の `VRChatSugarChecker.zip` をダウンロード
+2. 任意のフォルダに解凍
 3. `config.example.json` を `config.json` にコピー
 4. `config.json` を編集（後述）
 5. `VRChatSugarChecker.exe` を実行
 
-### 2. Python版（開発者向け）
+**メリット:**
+- インストール不要
+- USBメモリなどで持ち運び可能
+- 複数バージョンの併用が可能
+
+### 方法3: Python版（開発者向け）
 
 ```bash
 # リポジトリをクローン
@@ -161,14 +182,21 @@ python src/main.py --interval 10
 
 ### バックグラウンドモード
 
+#### インストーラー版の場合
+インストール時に「Windows起動時に自動実行」を選択していれば、Windows起動時に自動的にバックグラウンドで実行されます。
+
+手動で実行する場合:
+- スタートメニュー → VRChat Sugar Checker → VRChat Sugar Checker (バックグラウンド実行)
+
+#### ZIP版の場合
 ```bash
 # Windowsから
 scripts\run_silent.vbs をダブルクリック
 ```
 
-### スタートアップ登録（推奨）
+### スタートアップ登録（ZIP版のみ）
 
-Windows起動時に自動実行:
+ZIP版でWindows起動時に自動実行したい場合:
 
 ```powershell
 # インストール
@@ -177,6 +205,8 @@ powershell.exe -ExecutionPolicy Bypass -File scripts\install_startup.ps1
 # アンインストール
 powershell.exe -ExecutionPolicy Bypass -File scripts\uninstall_startup.ps1
 ```
+
+**注意:** インストーラー版を使用している場合は、この操作は不要です。
 
 ## 保存ファイル
 

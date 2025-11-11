@@ -46,20 +46,33 @@ jobs:
       # PyInstallerでビルド
       - name: Build with PyInstaller
         run: |
+          cd build
           pyinstaller VRChatSugarChecker.spec
+          cd ..
 
       # 必要なファイルをdistフォルダにコピー
       - name: Copy required files
         run: |
           if (-not (Test-Path "dist\logs")) { New-Item -ItemType Directory -Path "dist\logs" }
+          if (-not (Test-Path "dist\logs\audio")) { New-Item -ItemType Directory -Path "dist\logs\audio" }
+          if (-not (Test-Path "dist\logs\screenshots")) { New-Item -ItemType Directory -Path "dist\logs\screenshots" }
           Copy-Item "logs\.gitkeep" "dist\logs\" -ErrorAction SilentlyContinue
           Copy-Item "config.example.json" "dist\" -ErrorAction SilentlyContinue
-          Copy-Item "run_silent.vbs" "dist\" -ErrorAction SilentlyContinue
-          Copy-Item "install_startup.ps1" "dist\" -ErrorAction SilentlyContinue
-          Copy-Item "uninstall_startup.ps1" "dist\" -ErrorAction SilentlyContinue
+          Copy-Item "scripts\run_silent.vbs" "dist\" -ErrorAction SilentlyContinue
+          Copy-Item "scripts\install_startup.ps1" "dist\" -ErrorAction SilentlyContinue
+          Copy-Item "scripts\uninstall_startup.ps1" "dist\" -ErrorAction SilentlyContinue
           Copy-Item "README.md" "dist\" -ErrorAction SilentlyContinue
-          Copy-Item "BUILD_GUIDE.md" "dist\" -ErrorAction SilentlyContinue
-          Copy-Item "AUDIO_RECORDING.md" "dist\" -ErrorAction SilentlyContinue
+          Copy-Item "DEVELOPMENT.md" "dist\" -ErrorAction SilentlyContinue
+          Copy-Item "docs\BUILD_GUIDE.md" "dist\" -ErrorAction SilentlyContinue
+          Copy-Item "docs\AUDIO_RECORDING.md" "dist\" -ErrorAction SilentlyContinue
+        shell: powershell
+
+      # Inno Setupでインストーラーを作成
+      - name: Build installer with Inno Setup
+        run: |
+          choco install innosetup -y
+          $env:PATH += ";C:\Program Files (x86)\Inno Setup 6"
+          iscc "build\installer.iss"
         shell: powershell
 
       # ZIPファイルを作成
@@ -69,11 +82,18 @@ jobs:
         shell: powershell
 
       # アーティファクトをアップロード（ダウンロード可能にする）
-      - name: Upload build artifact
+      - name: Upload ZIP artifact
         uses: actions/upload-artifact@v4
         with:
-          name: VRChatSugarChecker-Windows
+          name: VRChatSugarChecker-ZIP
           path: VRChatSugarChecker.zip
+          retention-days: 90
+
+      - name: Upload Installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: VRChatSugarChecker-Installer
+          path: dist/VRChatSugarChecker_Setup_*.exe
           retention-days: 90
 
       # ビルド情報を出力
@@ -94,10 +114,15 @@ jobs:
 
     steps:
       # ビルドされたアーティファクトをダウンロード
-      - name: Download build artifact
+      - name: Download ZIP artifact
         uses: actions/download-artifact@v4
         with:
-          name: VRChatSugarChecker-Windows
+          name: VRChatSugarChecker-ZIP
+
+      - name: Download Installer artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: VRChatSugarChecker-Installer
 
       # バージョン名を決定
       - name: Determine version
@@ -129,6 +154,16 @@ jobs:
             - Windowsスタートアップ登録機能
 
             ### インストール方法
+
+            #### 方法1: インストーラー版（推奨）
+            1. `VRChatSugarChecker_Setup_xxx.exe` をダウンロード
+            2. インストーラーを実行
+            3. インストール時のオプションで以下を選択可能:
+               - デスクトップアイコンの作成
+               - Windows起動時の自動実行（バックグラウンド）
+            4. インストール完了後、`config.json` を編集して設定を変更
+
+            #### 方法2: ZIP版（ポータブル）
             1. `VRChatSugarChecker.zip` をダウンロード
             2. 任意のフォルダに解凍
             3. `config.example.json` を `config.json` にコピー
@@ -136,10 +171,7 @@ jobs:
             5. `VRChatSugarChecker.exe` を実行
 
             ### バックグラウンド実行
-            - `run_silent.vbs` をダブルクリック
-
-            ### スタートアップ登録
-            - PowerShellで `install_startup.ps1` を実行
+            - `run_silent.vbs` をダブルクリック、またはインストーラーでスタートアップに登録
 
             詳細は同梱の `README.md` を参照してください。
 
@@ -150,8 +182,12 @@ jobs:
 
             ---
 
-            **ダウンロード:** VRChatSugarChecker.zip
-          files: VRChatSugarChecker.zip
+            **ダウンロード:**
+            - インストーラー版（推奨）: `VRChatSugarChecker_Setup_xxx.exe`
+            - ZIP版（ポータブル）: `VRChatSugarChecker.zip`
+          files: |
+            VRChatSugarChecker-Installer/VRChatSugarChecker_Setup_*.exe
+            VRChatSugarChecker-ZIP/VRChatSugarChecker.zip
           draft: false
           prerelease: ${{ github.event.inputs.prerelease == 'true' }}
         env:
