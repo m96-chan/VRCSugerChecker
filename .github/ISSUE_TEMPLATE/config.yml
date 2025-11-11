@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: ドキュメント
+    url: https://github.com/yourusername/VRCSugerChecker/blob/main/README.md
+    about: README.md でよくある質問や使い方を確認できます
+  - name: 開発者向けドキュメント
+    url: https://github.com/yourusername/VRCSugerChecker/blob/main/DEVELOPMENT.md
+    about: 開発者向けの技術情報はこちらをご覧ください
