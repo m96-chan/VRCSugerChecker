@@ -36,7 +36,8 @@
     "on_instance_change": true,
     "auto_capture": true,
     "auto_capture_interval": 180,
-    "retention_days": 7
+    "retention_days": 7,
+    "notify_discord": true
   },
   "upload": {
     "enabled": false,
@@ -45,5 +46,28 @@
     "expires": "1w",
     "cleanup_after_upload": true,
     "notify_discord": true
+  },
+  "ai": {
+    "enabled": false,
+    "openai_api_key": "YOUR_OPENAI_API_KEY",
+    "image_analysis": {
+      "enabled": false,
+      "model": "gpt-4o",
+      "analyze_on_upload": false,
+      "analyze_screenshots": true
+    },
+    "audio_analysis": {
+      "enabled": false,
+      "transcription_model": "whisper-1",
+      "analysis_model": "gpt-4o",
+      "analyze_on_upload": false,
+      "min_duration_seconds": 60,
+      "preprocessing": {
+        "enabled": true,
+        "min_speech_ratio": 0.1,
+        "noise_tolerance_db": -40.0,
+        "silence_duration_seconds": 1.0
+      }
+    }
   }
 }

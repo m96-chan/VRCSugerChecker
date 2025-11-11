@@ -42,6 +42,7 @@ Name: "japanese"; MessagesFile: "compiler:Languages\Japanese.isl"
 Name: "desktopicon"; Description: "デスクトップにアイコンを作成する"; GroupDescription: "追加のアイコン:"
 Name: "startupicon"; Description: "スタートメニューにアイコンを作成する"; GroupDescription: "追加のアイコン:"; Flags: unchecked
 Name: "autostart"; Description: "Windows起動時に自動実行する（バックグラウンドで動作）"; GroupDescription: "スタートアップ設定:"; Flags: unchecked
+Name: "installffmpeg"; Description: "FFmpegをインストールする（音声録音機能に必要）"; GroupDescription: "オプション機能:"; Flags: unchecked
 
 [Files]
 ; メインの実行ファイル
@@ -88,18 +89,30 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 Filename: "{app}\{#MyAppExeName}"; Description: "設定ファイル (config.json) を作成する"; Flags: postinstall shellexec skipifsilent nowait unchecked
 
 [Code]
+var
+  FFmpegInstallNeeded: Boolean;
+
+// FFmpegがインストールされているか確認
+function IsFFmpegInstalled: Boolean;
+var
+  ResultCode: Integer;
+begin
+  Result := Exec('cmd.exe', '/C ffmpeg -version', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
 // インストール時に config.json が存在しない場合は config.example.json からコピー
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   ConfigFile: String;
   ExampleFile: String;
+  ResultCode: Integer;
 begin
   if CurStep = ssPostInstall then
   begin
+    // config.json の作成
     ConfigFile := ExpandConstant('{app}\config.json');
     ExampleFile := ExpandConstant('{app}\config.example.json');
 
-    // config.json が存在しない場合のみコピー
     if not FileExists(ConfigFile) then
     begin
       FileCopy(ExampleFile, ConfigFile, False);
@@ -107,6 +120,49 @@ begin
              'Discord WebHook URLなどを設定してください。' + #13#10 + #13#10 +
              'ファイルの場所: ' + ConfigFile,
              mbInformation, MB_OK);
+    end;
+
+    // FFmpegのインストール (installffmpeg タスクが選択されている場合)
+    if WizardIsTaskSelected('installffmpeg') then
+    begin
+      if not IsFFmpegInstalled then
+      begin
+        MsgBox('FFmpegをインストールします。' + #13#10 +
+               'winget を使用してインストールを試みます。' + #13#10 +
+               '数分かかる場合があります。',
+               mbInformation, MB_OK);
+
+        if Exec('cmd.exe', '/C winget install --id=Gyan.FFmpeg -e --silent', '', SW_SHOW, ewWaitUntilTerminated, ResultCode) then
+        begin
+          if ResultCode = 0 then
+          begin
+            MsgBox('FFmpegのインストールが完了しました。' + #13#10 +
+                   '音声録音機能が使用できます。',
+                   mbInformation, MB_OK);
+          end
+          else
+          begin
+            MsgBox('FFmpegのインストールに失敗しました。' + #13#10 +
+                   '手動でインストールしてください:' + #13#10 +
+                   'コマンドプロンプトで以下を実行:' + #13#10 +
+                   'winget install FFmpeg',
+                   mbError, MB_OK);
+          end;
+        end
+        else
+        begin
+          MsgBox('FFmpegのインストールを開始できませんでした。' + #13#10 +
+                 '手動でインストールしてください:' + #13#10 +
+                 'コマンドプロンプトで以下を実行:' + #13#10 +
+                 'winget install FFmpeg',
+                 mbError, MB_OK);
+        end;
+      end
+      else
+      begin
+        MsgBox('FFmpegは既にインストールされています。',
+               mbInformation, MB_OK);
+      end;
     end;
   end;
 end;

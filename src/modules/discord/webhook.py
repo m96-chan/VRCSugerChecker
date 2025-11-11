@@ -71,6 +71,62 @@ class DiscordWebhook:
             logger.error(f"Discord通知の送信中にエラーが発生: {e}")
             return False
 
+    def send_with_file(self, file_path: str, content: str = None, embed: Dict = None) -> bool:
+        """
+        ファイル付きでWebHookを送信
+        Args:
+            file_path: 送信するファイルのパス
+            content: メッセージ本文
+            embed: 埋め込み
+        Returns:
+            bool: 送信成功ならTrue
+        """
+        try:
+            from pathlib import Path
+            file_path = Path(file_path)
+
+            if not file_path.exists():
+                logger.error(f"File not found: {file_path}")
+                return False
+
+            payload = {
+                "username": self.username,
+            }
+
+            if self.avatar_url:
+                payload["avatar_url"] = self.avatar_url
+
+            if content:
+                payload["content"] = content
+
+            if embed:
+                payload["embeds"] = [embed]
+
+            # ファイルをアップロード
+            with open(file_path, 'rb') as f:
+                files = {
+                    'file': (file_path.name, f, 'image/png')
+                }
+
+                # payload_jsonとして送信（multipart/form-dataの場合）
+                response = requests.post(
+                    self.webhook_url,
+                    data={'payload_json': json.dumps(payload)},
+                    files=files,
+                    timeout=30
+                )
+
+            if response.status_code == 200 or response.status_code == 204:
+                logger.debug(f"Discord通知（ファイル付き）を送信しました: {file_path.name}")
+                return True
+            else:
+                logger.error(f"Discord通知（ファイル付き）の送信に失敗: {response.status_code} - {response.text}")
+                return False
+
+        except Exception as e:
+            logger.error(f"Discord通知（ファイル付き）の送信中にエラーが発生: {e}")
+            return False
+
     def send_vrchat_started(self) -> bool:
         """
         VRChat起動通知を送信
@@ -389,6 +445,287 @@ class DiscordWebhook:
         }
 
         return self.send(embed=embed)
+
+    def send_avatar_detection(self, screenshot_path: str, has_avatars: bool, avatar_count: int,
+                              confidence: str, description: str, world_name: str = None) -> bool:
+        """
+        アバター検出結果通知を送信（画像ファイル付き）
+        Args:
+            screenshot_path: スクリーンショットのファイルパス
+            has_avatars: 他のアバターが検出されたか
+            avatar_count: アバター数
+            confidence: 確信度
+            description: 詳細説明
+            world_name: ワールド名
+        Returns:
+            bool: 送信成功ならTrue
+        """
+        if not has_avatars:
+            return True  # 他のアバターがいない場合は通知しない
+
+        emoji = "👥" if avatar_count > 1 else "🧑"
+        color = 0x2ecc71 if confidence == "high" else (0xf39c12 if confidence == "medium" else 0xe74c3c)
+
+        fields = [
+            {
+                "name": "検出されたアバター数",
+                "value": f"{avatar_count}人",
+                "inline": True
+            },
+            {
+                "name": "確信度",
+                "value": confidence.upper(),
+                "inline": True
+            },
+            {
+                "name": "詳細",
+                "value": description,
+                "inline": False
+            }
+        ]
+
+        if world_name:
+            fields.insert(0, {
+                "name": "🌍 ワールド",
+                "value": world_name,
+                "inline": False
+            })
+
+        embed = {
+            "title": f"{emoji} 他のアバターを検出しました",
+            "color": color,
+            "fields": fields,
+            "timestamp": datetime.utcnow().isoformat(),
+            "footer": {
+                "text": "VRChat Sugar Checker | AI Avatar Detection"
+            }
+        }
+        return self.send_with_file(screenshot_path, embed=embed)
+
+    def send_screenshot_notification(self, screenshot_path: str, world_name: str = None,
+                                     reason: str = None) -> bool:
+        """
+        スクリーンショット撮影通知を送信（AI機能OFF時用、画像ファイル付き）
+        Args:
+            screenshot_path: スクリーンショットのファイルパス
+            world_name: ワールド名
+            reason: 撮影理由（例: "instance_change", "auto_capture"）
+        Returns:
+            bool: 送信成功ならTrue
+        """
+        reason_text = {
+            "instance_change": "インスタンス変更時",
+            "auto_capture": "定期自動撮影",
+            "manual": "手動撮影"
+        }.get(reason, "")
+
+        fields = []
+
+        if world_name:
+            fields.append({
+                "name": "🌍 ワールド",
+                "value": world_name,
+                "inline": False
+            })
+
+        if reason_text:
+            fields.append({
+                "name": "📍 撮影タイミング",
+                "value": reason_text,
+                "inline": True
+            })
+
+        embed = {
+            "title": "📸 スクリーンショット撮影",
+            "color": 0x3498db,  # 青色
+            "fields": fields,
+            "timestamp": datetime.utcnow().isoformat(),
+            "footer": {
+                "text": "VRChat Sugar Checker | Screenshot"
+            }
+        }
+        return self.send_with_file(screenshot_path, embed=embed)
+
+    def send_conversation_summary(self, world_name: str, topics: List[str], summary: str,
+                                   decisions: Optional[List[str]], promises: Optional[List[str]],
+                                   duration_minutes: int = None) -> bool:
+        """
+        会話内容サマリ通知を送信
+        Args:
+            world_name: ワールド名
+            topics: トピック一覧
+            summary: 会話内容の概要
+            decisions: 決めたこと
+            promises: 約束したこと
+            duration_minutes: 録音時間（分）
+        Returns:
+            bool: 送信成功ならTrue
+        """
+        fields = [
+            {
+                "name": "🌍 ワールド",
+                "value": world_name or "不明",
+                "inline": False
+            },
+            {
+                "name": "📋 トピック",
+                "value": "\n".join([f"• {topic}" for topic in topics]) if topics else "なし",
+                "inline": False
+            },
+            {
+                "name": "💬 会話内容の概要",
+                "value": summary,
+                "inline": False
+            }
+        ]
+
+        if decisions:
+            fields.append({
+                "name": "✅ 決めたこと",
+                "value": "\n".join([f"• {decision}" for decision in decisions]),
+                "inline": False
+            })
+
+        if promises:
+            fields.append({
+                "name": "🤝 約束したこと",
+                "value": "\n".join([f"• {promise}" for promise in promises]),
+                "inline": False
+            })
+
+        if duration_minutes:
+            fields.append({
+                "name": "⏱️ 録音時間",
+                "value": f"{duration_minutes}分",
+                "inline": True
+            })
+
+        embed = {
+            "title": "🎙️ 会話内容サマリ",
+            "color": 0x9b59b6,  # 紫色
+            "fields": fields,
+            "timestamp": datetime.utcnow().isoformat(),
+            "footer": {
+                "text": "VRChat Sugar Checker | AI Conversation Analysis"
+            }
+        }
+        return self.send(embed=embed)
+
+    def send_time_summary(self, world_name: str, instance_id: str, total_duration: str,
+                          user_times: Dict[str, str]) -> bool:
+        """
+        インスタンス離脱時の滞在時間サマリ通知を送信（複数投稿に分割）
+        Args:
+            world_name: ワールド名
+            instance_id: インスタンスID
+            total_duration: 総滞在時間（HH:MM:SS形式）
+            user_times: ユーザー毎の一緒にいた時間 {display_name: duration_str}
+        Returns:
+            bool: 送信成功ならTrue
+        """
+        # 滞在時間でソート（長い順）
+        sorted_users = sorted(user_times.items(), key=lambda x: x[1], reverse=True) if user_times else []
+
+        # ユーザーリストをフィールドサイズ制限（1024文字）ごとに分割
+        user_chunks = self._split_users_into_chunks(sorted_users, max_length=1024)
+
+        # 最初のEmbed（サマリ情報含む）
+        first_fields = [
+            {
+                "name": "🌍 ワールド",
+                "value": world_name or "不明",
+                "inline": False
+            },
+            {
+                "name": "⏱️ 総滞在時間",
+                "value": total_duration,
+                "inline": True
+            },
+            {
+                "name": "👥 一緒にいた人数",
+                "value": f"{len(user_times)}人",
+                "inline": True
+            }
+        ]
+
+        # 最初のユーザーチャンクを追加
+        if user_chunks:
+            first_fields.append({
+                "name": f"🕐 ユーザー毎の滞在時間 (1/{len(user_chunks)})",
+                "value": user_chunks[0],
+                "inline": False
+            })
+
+        first_embed = {
+            "title": "👋 インスタンスを離れました",
+            "description": "滞在時間のサマリです",
+            "color": 0x95a5a6,  # グレー
+            "fields": first_fields,
+            "timestamp": datetime.utcnow().isoformat(),
+            "footer": {
+                "text": "VRChat Sugar Checker | Time Tracking"
+            }
+        }
+
+        # 最初のEmbedを送信
+        success = self.send(embed=first_embed)
+        if not success:
+            return False
+
+        # 残りのユーザーチャンクを追加のEmbedとして送信
+        for i, chunk in enumerate(user_chunks[1:], start=2):
+            additional_embed = {
+                "color": 0x95a5a6,
+                "fields": [
+                    {
+                        "name": f"🕐 ユーザー毎の滞在時間 (続き {i}/{len(user_chunks)})",
+                        "value": chunk,
+                        "inline": False
+                    }
+                ],
+                "footer": {
+                    "text": "VRChat Sugar Checker | Time Tracking"
+                }
+            }
+            success = self.send(embed=additional_embed)
+            if not success:
+                logger.warning(f"Failed to send time summary chunk {i}/{len(user_chunks)}")
+
+        return True
+
+    def _split_users_into_chunks(self, sorted_users: list, max_length: int = 1024) -> list:
+        """
+        ユーザーリストをDiscord fieldの文字数制限に合わせて分割
+        Args:
+            sorted_users: ソート済みユーザーリスト [(display_name, duration), ...]
+            max_length: 最大文字数（デフォルト: 1024）
+        Returns:
+            list: 分割されたテキストのリスト
+        """
+        chunks = []
+        current_chunk = []
+        current_length = 0
+
+        for display_name, duration in sorted_users:
+            line = f"• {display_name}: {duration}"
+            line_length = len(line) + 1  # +1 for newline
+
+            # 現在のチャンクに追加すると制限を超える場合
+            if current_length + line_length > max_length and current_chunk:
+                # 現在のチャンクを保存
+                chunks.append("\n".join(current_chunk))
+                current_chunk = []
+                current_length = 0
+
+            # 行を追加
+            current_chunk.append(line)
+            current_length += line_length
+
+        # 最後のチャンクを追加
+        if current_chunk:
+            chunks.append("\n".join(current_chunk))
+
+        return chunks
 
 
 def send_notification(webhook_url: str, message: str, title: str = None, color: int = 0x3498db) -> bool:
