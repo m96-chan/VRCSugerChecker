@@ -1,267 +1,263 @@
 # VRChat Sugar Checker
 
-VRChat.exeのプロセスを監視し、起動時に自動的にログ解析を開始するツールです。
-バックグラウンドで目立たないように動作し、Discord WebHookで通知を送信できます。
+VRChatの活動を自動記録・通知するツールです。VRChatプレイ中の音声、スクリーンショット、ログを自動保存し、Discord通知やクラウドアップロードができます。
 
-## 機能
+## 主な機能
 
-- VRChat.exeの起動/終了を自動検出
-- VRChatログファイルの自動解析
-- 現在いるインスタンスのユーザー情報を取得
-- バックグラウンドでサイレント実行
-- Windowsスタートアップ登録機能
-- **Discord WebHook通知機能**
-  - VRChat起動/終了通知
-  - インスタンス情報通知
-  - インスタンス変更通知
-  - ユーザー参加/退出通知（オプション）
+### 🎮 自動監視
+- VRChatの起動/終了を自動検出
+- バックグラウンドで目立たないように動作
+- Windowsスタートアップに登録可能
 
-## 必要な環境
+### 📢 Discord通知
+- VRChat起動/終了の通知
+- インスタンス変更の通知
+- ユーザー参加/退出の通知（オプション）
+- インスタンスリンク付きで簡単参加
 
-- Windows 10/11（WSL2環境で開発・実行）
-- Python 3.7以上
-- PowerShell
-- Discord WebHook URL（通知機能を使う場合）
+### 🎙️ 音声録音
+- VRChatの音声を自動録音（システム音声 + マイク）
+- ワールド毎にファイル自動整理
+- m4a形式で高品質録音
 
-## セットアップ
+### 📸 スクリーンショット
+- インスタンス変更時の自動撮影
+- 定期的な自動撮影（デフォルト: 3分間隔）
+- VRChatウィンドウを自動キャプチャ
 
-### 1. Discord WebHookの設定（オプション）
+### ☁️ ファイルアップロード
+- file.io を使用した自動アップロード
+- VRChat終了時に自動実行
+- ワールド毎にZIP圧縮して整理
+- アップロード完了をDiscordに通知
 
-Discord通知を使用する場合は、以下の手順でWebHookを作成してください。
+## 動作環境
 
-1. Discordサーバーで、通知を送信したいチャンネルの設定を開く
-2. 「連携サービス」→「ウェブフック」→「新しいウェブフック」をクリック
-3. WebHook URLをコピー
+- **OS**: Windows 10/11
+- **Python**: 3.13以上
+- **その他**: PowerShell、FFmpeg（音声録音を使う場合）
 
-### 2. 設定ファイルの作成
+## インストール
+
+### 1. 実行ファイル版（推奨）
+
+1. [Releases](../../releases) から最新版をダウンロード
+2. ZIPファイルを解凍
+3. `config.example.json` を `config.json` にコピー
+4. `config.json` を編集（後述）
+5. `VRChatSugarChecker.exe` を実行
+
+### 2. Python版（開発者向け）
 
 ```bash
-# サンプル設定ファイルをコピー
-cp config.example.json config.json
+# リポジトリをクローン
+git clone https://github.com/yourusername/VRCSugerChecker.git
+cd VRCSugerChecker
 
-# config.jsonを編集
+# 依存関係をインストール
+pip install -r requirements.txt
+# または
+uv sync
+
+# 実行
+python src/main.py
 ```
 
-**config.json の設定例:**
+## 設定方法
+
+### Discord WebHook（任意）
+
+Discord通知を使用する場合:
+
+1. Discordサーバーで通知を送信したいチャンネルを開く
+2. チャンネル設定 → 連携サービス → ウェブフック → 新しいウェブフック
+3. WebHook URLをコピー
+4. `config.json` の `discord.webhook_url` に貼り付け
+
+### 設定ファイル（config.json）
+
+主要な設定項目:
 
 ```json
 {
   "discord": {
     "enabled": true,
-    "webhook_url": "https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN",
-    "username": "VRChat Sugar Checker",
-    "avatar_url": "",
+    "webhook_url": "YOUR_WEBHOOK_URL",
     "notifications": {
       "vrchat_started": true,
       "vrchat_stopped": true,
       "instance_info": true,
       "instance_changed": true,
-      "user_joined": true,
-      "user_left": true
+      "user_joined": false,
+      "user_left": false
     }
   },
-  "monitoring": {
-    "check_interval": 5,
-    "log_update_interval": 30
+  "audio": {
+    "enabled": true,
+    "auto_start": true,
+    "auto_stop": true,
+    "retention_days": 7
+  },
+  "screenshot": {
+    "enabled": true,
+    "on_instance_change": true,
+    "auto_capture": true,
+    "auto_capture_interval": 180,
+    "retention_days": 7
+  },
+  "upload": {
+    "enabled": true,
+    "upload_on_exit": true,
+    "daily_upload": true,
+    "expires": "1w",
+    "cleanup_after_upload": true,
+    "notify_discord": true
   }
 }
 ```
 
-**設定項目の説明:**
+#### 設定項目の説明
 
-- `discord.enabled`: Discord通知の有効/無効
-- `discord.webhook_url`: Discord WebHookのURL
-- `discord.username`: Botの表示名
-- `discord.avatar_url`: Botのアバター画像URL（オプション）
-- `discord.notifications`: 各通知の有効/無効
-  - `vrchat_started`: VRChat起動通知
-  - `vrchat_stopped`: VRChat終了通知
-  - `instance_info`: インスタンス情報通知（起動時）
-  - `instance_changed`: インスタンス変更通知
-  - `user_joined`: ユーザー参加通知
-  - `user_left`: ユーザー退出通知
-- `monitoring.check_interval`: VRChatプロセスのチェック間隔（秒）
-- `monitoring.log_update_interval`: ログ更新間隔（秒）
+**Discord通知**
+- `enabled`: Discord通知の有効化
+- `webhook_url`: Discord WebHook URL
+- `notifications.*`: 各種通知の有効/無効
 
-### 3. 基本的な使い方（通常モード）
+**音声録音**
+- `enabled`: 音声録音の有効化
+- `auto_start`: VRChat起動時に自動録音開始
+- `auto_stop`: VRChat終了時に自動録音停止
+- `retention_days`: 録音ファイルの保持期間（日数）
 
-コンソール画面に情報を表示しながら実行します。
+**スクリーンショット**
+- `enabled`: スクリーンショット機能の有効化
+- `on_instance_change`: インスタンス変更時に撮影
+- `auto_capture`: 定期的な自動撮影
+- `auto_capture_interval`: 撮影間隔（秒）
+- `retention_days`: スクリーンショットの保持期間（日数）
 
-```bash
-python main.py
+**ファイルアップロード**
+- `enabled`: アップロード機能の有効化
+- `upload_on_exit`: VRChat終了時にアップロード
+- `daily_upload`: 日をまたいだ場合にアップロード
+- `expires`: file.io の有効期限（1d/1w/1m/1y）
+- `cleanup_after_upload`: アップロード後にファイル削除（ログは除く）
+- `notify_discord`: Discord通知を送信
 
-# 設定ファイルを指定する場合
-python main.py --config config.json
+## 使い方
 
-# チェック間隔を変更する場合
-python main.py --interval 10
-```
-
-### 4. バックグラウンドモード（サイレント実行）
-
-コンソール画面を表示せず、ログファイルに記録します。
+### 通常モード
 
 ```bash
-# VBSファイルをダブルクリック（Windowsから）
-# run_silent.vbs をダブルクリック
+# デフォルト設定で起動
+python src/main.py
+
+# 設定ファイルを指定
+python src/main.py --config config.json
+
+# チェック間隔を変更
+python src/main.py --interval 10
 ```
 
-### 5. スタートアップ登録（推奨）
+### バックグラウンドモード
 
-Windows起動時に自動的にバックグラウンドで実行されるようにします。
+```bash
+# Windowsから
+scripts\run_silent.vbs をダブルクリック
+```
 
-**インストール:**
+### スタートアップ登録（推奨）
+
+Windows起動時に自動実行:
 
 ```powershell
-# PowerShellを開く（管理者権限不要）
-cd C:\path\to\VRCSugerChecker
+# インストール
+powershell.exe -ExecutionPolicy Bypass -File scripts\install_startup.ps1
 
-# スタートアップに登録
-powershell.exe -ExecutionPolicy Bypass -File install_startup.ps1
+# アンインストール
+powershell.exe -ExecutionPolicy Bypass -File scripts\uninstall_startup.ps1
 ```
 
-**アンインストール:**
+## 保存ファイル
 
-```powershell
-powershell.exe -ExecutionPolicy Bypass -File uninstall_startup.ps1
-```
-
-## コマンドラインオプション
-
-```bash
-python main.py [オプション]
-
-オプション:
-  --config PATH     設定ファイルのパス（デフォルト: config.json）
-  --interval SEC    プロセスチェック間隔（秒）
-  -h, --help        ヘルプを表示
-```
-
-## ファイル構成
+すべてのファイルは `logs/` フォルダに保存されます:
 
 ```
-VRCSugerChecker/
-├── main.py                  # メインスクリプト
-├── config.example.json      # 設定ファイルのサンプル
-├── config.json              # 設定ファイル（自分で作成）
-├── run_silent.vbs           # バックグラウンド起動用VBScript
-├── install_startup.ps1      # スタートアップ登録スクリプト
-├── uninstall_startup.ps1    # スタートアップ削除スクリプト
-├── vrchat_checker.log       # ログファイル（自動生成）
-├── README.md                # このファイル
-├── .gitignore               # Git除外設定
-└── submodules/
-    ├── vrc/
-    │   └── parse_logs.py    # VRChatログ解析モジュール
-    └── discord/
-        ├── __init__.py
-        └── webhook.py       # Discord WebHook通知モジュール
+logs/
+├── vrchat_checker.log         # テキストログ（7日間ローテーション）
+├── audio/                      # 音声録音
+│   └── worldID-20231111_120000.m4a
+├── screenshots/                # スクリーンショット
+│   └── vrchat_instance_change_20231111_120030.png
+└── upload_temp/                # アップロード用一時ファイル
 ```
 
 ## Discord通知の例
 
-### VRChat起動通知
-
-```
-🎮 VRChat起動
-VRChat.exeが起動しました
-```
-
-### インスタンス情報通知
-
+### インスタンス情報
 ```
 📊 インスタンス情報
 
 🌍 ワールド: JP Tutorial World
 📍 インスタンスID: wrld_xxx:12345~region(jp)
+🔗 インスタンスリンク: [VRChatで開く](https://vrchat.com/home/launch?worldId=...)
 👥 一緒にいるユーザー (3人)
 1. UserName1
 2. UserName2
 3. UserName3
 ```
 
-### ユーザー参加通知
-
+### ファイルアップロード完了
 ```
-✅ ユーザー参加
-UserName が参加しました
+📤 ファイルアップロード完了
 
-ユーザーID: usr_xxx
-現在のユーザー数: 4人
+3個のアーカイブをアップロードしました
+合計サイズ: 245.67 MB
+
+📦 1. Tutorial_World
+ファイル名: Tutorial_World_20231111.zip
+サイズ: 123.45 MB
+ダウンロード: file.io
+有効期限: 1週間
 ```
-
-## ログファイル
-
-実行ログは `vrchat_checker.log` に記録されます。
-
-ログには以下の情報が含まれます：
-- VRChat.exeの起動/終了イベント
-- 現在のインスタンスID
-- ワールド名
-- 一緒にいるユーザーのリスト（表示名とユーザーID）
-
-## WSL環境での注意事項
-
-WSL環境で実行する場合、環境変数 `WINDOWS_USER` を設定する必要がある場合があります:
-
-```bash
-export WINDOWS_USER=YourWindowsUsername
-```
-
-`.bashrc` または `.zshrc` に追加すると永続化できます。
-
-## プロセス停止方法
-
-### 通常モードで起動した場合
-- `Ctrl+C` で停止
-
-### バックグラウンドで起動した場合
-- タスクマネージャーから "python" または "pythonw" プロセスを終了
-- PowerShellから:
-  ```powershell
-  Get-Process python* | Where-Object {$_.Path -like "*VRCSugerChecker*"} | Stop-Process
-  ```
-
-## セキュリティとプライバシー
-
-このツールは以下のデータにアクセスします：
-- VRChatのローカルログファイル（読み取りのみ）
-- Windowsプロセス情報（VRChat.exeの起動状態確認）
-
-データの扱い：
-- ログファイルはローカルに保存されます
-- Discord通知を有効にした場合、インスタンス情報とユーザー情報がDiscordサーバーに送信されます
-- それ以外のデータは外部に送信されません
 
 ## トラブルシューティング
 
-### Discord通知が届かない場合
-- `config.json` の `webhook_url` が正しいか確認
-- `discord.enabled` が `true` になっているか確認
-- 各通知の設定が `true` になっているか確認
+### Discord通知が届かない
+- `config.json` の `webhook_url` を確認
+- `discord.enabled` が `true` か確認
 - インターネット接続を確認
 
-### VBSが起動しない場合
-- Pythonが正しくインストールされているか確認
-- `python3` コマンドが使えるか確認
-- `run_silent.vbs` 内のパスを確認
+### 音声録音ができない
+- FFmpegがインストールされているか確認
+- ステレオミキサーが有効か確認（サウンド設定）
+- マイクデバイスが認識されているか確認
 
-### ログが記録されない場合
-- 書き込み権限があるか確認
-- ディスク容量を確認
+### スクリーンショットが撮れない
+- VRChatがウィンドウモードで起動しているか確認
+- pywin32がインストールされているか確認
 
-### VRChatログが見つからない場合
-- VRChatが正しくインストールされているか確認
-- WSL環境では `WINDOWS_USER` 環境変数を設定
+### ファイルアップロードが失敗する
+- インターネット接続を確認
+- file.io のサービス状態を確認
+- ファイルサイズが大きすぎないか確認（推奨: 500MB以下）
 
-## 依存関係
+## セキュリティとプライバシー
 
-- `requests`: Discord WebHook送信に使用
+### アクセスするデータ
+- VRChatのローカルログファイル（読み取りのみ）
+- Windowsプロセス情報（VRChat.exe の起動状態）
+- 音声入出力デバイス（録音機能使用時）
 
-インストール:
-```bash
-pip install requests
-```
+### データの保存先
+- **ローカル**: `logs/` フォルダ
+- **Discord**: 通知メッセージ（インスタンス情報、ユーザー情報）
+- **file.io**: アップロードされたファイル（1週間後自動削除）
+
+### 注意事項
+- 音声録音機能は他のユーザーのプライバシーに関わる場合があります
+- 録音する際は一緒にいるユーザーの同意を得ることを推奨します
+- アップロードされたファイルのURLは誰でもアクセス可能です
 
 ## ライセンス
 
@@ -272,3 +268,9 @@ pip install requests
 - このツールは非公式のサードパーティツールです
 - VRChatの利用規約に違反しないよう注意してください
 - 使用は自己責任でお願いします
+
+## サポート
+
+- **バグ報告**: [Issues](../../issues)
+- **機能リクエスト**: [Issues](../../issues)
+- **開発者向けドキュメント**: [DEVELOPMENT.md](DEVELOPMENT.md)

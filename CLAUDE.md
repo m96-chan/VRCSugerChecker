@@ -2,9 +2,19 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Documentation Structure
+
+- **README.md**: ユーザー向けドキュメント（機能説明、インストール、使い方）
+- **DEVELOPMENT.md**: 開発者向けドキュメント（アーキテクチャ、開発環境、実装詳細）
+- **CLAUDE.md**: このファイル（Claude Code向けの技術ガイド）
+- **docs/**: 詳細ドキュメント
+  - **BUILD_GUIDE.md**: ビルド手順
+  - **RELEASE_GUIDE.md**: リリース手順
+  - **AUDIO_RECORDING.md**: 音声録音機能の詳細
+
 ## Project Overview
 
-VRChat Sugar Checker is a Windows process monitoring tool that watches VRChat.exe execution and automatically parses VRChat logs to track instance information, user joins/leaves, and send Discord notifications. It runs in the background on Windows (developed in WSL2) and includes audio recording and screenshot capture capabilities.
+VRChat Sugar Checker is a Windows process monitoring tool that watches VRChat.exe execution and automatically parses VRChat logs to track instance information, user joins/leaves, and send Discord notifications. It runs in the background on Windows (developed in WSL2) and includes audio recording, screenshot capture, and file upload capabilities.
 
 ## Development Environment
 
