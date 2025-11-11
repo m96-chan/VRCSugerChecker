@@ -7,6 +7,11 @@ requires-python = ">=3.13"
 dependencies = [
     "dotenv>=0.9.9",
     "requests>=2.32.5",
-    "pywin32>=308",
+    "pywin32>=308; sys_platform == 'win32'",
     "pillow>=10.0.0",
+    "openai>=1.0.0",
+    "pyinstaller>=6.0.0",
 ]
+
+[tool.uv]
+environments = ["sys_platform == 'win32'", "sys_platform == 'linux'"]
