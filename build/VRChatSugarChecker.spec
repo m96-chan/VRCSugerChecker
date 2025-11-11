@@ -63,6 +63,4 @@ exe = EXE(
     entitlements_file=None,
     # アイコンファイル（オプション）
     # icon='icon.ico',
-    # プロジェクトルートのdistフォルダに出力
-    distpath=str(ROOT_DIR / 'dist'),
 )
