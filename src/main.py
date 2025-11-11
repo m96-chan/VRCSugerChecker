@@ -305,6 +305,10 @@ def start_log_monitoring():
         last_users = result['users_in_instance'].copy()
         last_world_name = result['current_world']
 
+        # ワールド情報をログに出力
+        if result['current_world'] and result['current_instance']:
+            logger.info(f"[WORLD] {result['current_world']} (Instance: {result['current_instance']})")
+
         # Audio録音開始（ワールドに入っている場合）
         if audio_recorder and config.get("audio", {}).get("enabled", False):
             if config.get("audio", {}).get("auto_start", False) and result['current_world']:
@@ -355,6 +359,7 @@ def update_log_monitoring():
         if current_world and current_world != last_world_name and last_world_name is not None:
             world_changed = True
             print(f"\n[検出] ワールド変更: {current_world}")
+            logger.info(f"[WORLD] {current_world} (Instance: {current_instance})")
 
         # インスタンス変更を検出
         if current_instance and current_instance != last_instance_id and last_instance_id is not None:
@@ -399,6 +404,7 @@ def update_log_monitoring():
                     for user, user_id in current_users.items():
                         if user not in last_users:
                             print(f"\n[検出] ユーザー参加: {user}")
+                            logger.info(f"[JOIN] {user} joined {current_world or '不明'}")
                             discord_webhook.send_user_joined(user, user_id, len(current_users))
 
                 # 退出ユーザー
@@ -406,6 +412,7 @@ def update_log_monitoring():
                     for user, user_id in last_users.items():
                         if user not in current_users:
                             print(f"\n[検出] ユーザー退出: {user}")
+                            logger.info(f"[LEFT] {user} left {current_world or '不明'}")
                             discord_webhook.send_user_left(user, user_id, len(current_users))
 
         # 状態を更新

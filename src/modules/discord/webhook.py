@@ -231,11 +231,6 @@ class DiscordWebhook:
             "color": 0x2ecc71,  # 緑色
             "fields": [
                 {
-                    "name": "ユーザーID",
-                    "value": f"`{user_id}`",
-                    "inline": False
-                },
-                {
                     "name": "現在のユーザー数",
                     "value": f"{user_count}人",
                     "inline": True
@@ -264,11 +259,6 @@ class DiscordWebhook:
             "description": f"**[{display_name}]({profile_url})** が退出しました",
             "color": 0xe74c3c,  # 赤色
             "fields": [
-                {
-                    "name": "ユーザーID",
-                    "value": f"`{user_id}`",
-                    "inline": False
-                },
                 {
                     "name": "現在のユーザー数",
                     "value": f"{user_count}人",
