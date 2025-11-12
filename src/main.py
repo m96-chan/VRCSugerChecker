@@ -23,6 +23,13 @@ from screenshot.capture import ScreenshotCapture
 from audio.recorder import AudioRecorder
 from upload.uploader import FileUploader
 
+# AI画像分析のインポート（オプショナル）
+try:
+    from ai.image_analyzer import ImageAnalyzer
+    IMAGE_ANALYZER_AVAILABLE = True
+except ImportError:
+    IMAGE_ANALYZER_AVAILABLE = False
+
 # ロガー設定
 logger = logging.getLogger(__name__)
 
@@ -31,6 +38,7 @@ discord_webhook: Optional[DiscordWebhook] = None
 screenshot_capture: Optional[ScreenshotCapture] = None
 audio_recorder: Optional[AudioRecorder] = None
 file_uploader: Optional[FileUploader] = None
+image_analyzer: Optional['ImageAnalyzer'] = None
 config: Dict = {}
 last_instance_id: Optional[str] = None
 last_users: Dict[str, str] = {}
@@ -326,6 +334,9 @@ def start_log_monitoring():
                         world_name=result['current_world'] or "不明",
                         reason="manual"
                     )
+                # 画像分析
+                if screenshot_path and image_analyzer:
+                    analyze_screenshot(screenshot_path, world_name=result['current_world'] or "不明")
 
             # 定期的な自動キャプチャを開始
             if config.get("screenshot", {}).get("auto_capture", False):
@@ -394,6 +405,9 @@ def update_log_monitoring():
                             world_name=current_world or "不明",
                             reason="instance_change"
                         )
+                    # 画像分析
+                    if screenshot_path and image_analyzer:
+                        analyze_screenshot(screenshot_path, world_name=current_world or "不明")
 
         # Audio録音の停止・開始（ワールド変更時）
         if audio_recorder and config.get("audio", {}).get("enabled", False) and world_changed:
@@ -445,6 +459,46 @@ def update_log_monitoring():
 
     except Exception as e:
         print(f"\n[エラー] ログ更新中にエラー: {e}")
+
+
+def analyze_screenshot(screenshot_path: Path, world_name: str = "不明"):
+    """
+    スクリーンショットを画像分析して結果をDiscordに通知
+    Args:
+        screenshot_path: スクリーンショットのパス
+        world_name: ワールド名
+    """
+    if not image_analyzer:
+        return
+
+    ai_config = config.get("ai", {})
+    image_config = ai_config.get("image_analysis", {})
+
+    if not image_config.get("analyze_screenshots", True):
+        return
+
+    try:
+        logger.info(f"画像分析を開始: {screenshot_path.name}")
+        result = image_analyzer.analyze_avatar_presence(screenshot_path)
+
+        logger.info(f"画像分析結果: has_other_avatars={result['has_other_avatars']}, "
+                   f"avatar_count={result['avatar_count']}, confidence={result['confidence']}")
+
+        # Discord通知
+        if discord_webhook:
+            discord_webhook.send_avatar_detection(
+                screenshot_path=str(screenshot_path),
+                has_avatars=result['has_other_avatars'],
+                avatar_count=result['avatar_count'],
+                confidence=result['confidence'],
+                description=result['description'],
+                world_name=world_name
+            )
+
+    except Exception as e:
+        logger.error(f"画像分析中にエラー: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 def stop_log_monitoring():
@@ -505,7 +559,7 @@ def upload_files_to_cloud():
 
 def main():
     """メイン処理"""
-    global discord_webhook, screenshot_capture, audio_recorder, file_uploader, config
+    global discord_webhook, screenshot_capture, audio_recorder, file_uploader, image_analyzer, config
 
     # コマンドライン引数のパース
     parser = argparse.ArgumentParser(description='VRChat Sugar Checker - VRChat.exeプロセス監視ツール')
@@ -573,12 +627,15 @@ def main():
         screenshot_callback = None
         if discord_webhook and screenshot_config.get("notify_discord", True):
             def screenshot_callback(screenshot_path: Path, reason: str):
-                """スクリーンショット撮影時のDiscord通知コールバック"""
+                """スクリーンショット撮影時のDiscord通知と画像分析コールバック"""
                 discord_webhook.send_screenshot_notification(
                     screenshot_path=str(screenshot_path),
                     world_name=last_world_name or "不明",
                     reason=reason
                 )
+                # 画像分析（自動キャプチャの場合）
+                if reason == "auto_capture" and image_analyzer:
+                    analyze_screenshot(screenshot_path, world_name=last_world_name or "不明")
 
         screenshot_capture = ScreenshotCapture(logs_dir, screenshot_callback=screenshot_callback)
         logger.info("スクリーンショット撮影が有効になっています")
@@ -599,6 +656,29 @@ def main():
         file_uploader.cleanup_old_error_files(days=7)
     else:
         logger.info("ファイルアップロードは無効です")
+
+    # AI画像分析の初期化
+    ai_config = config.get("ai", {})
+    if ai_config.get("enabled", False) and IMAGE_ANALYZER_AVAILABLE:
+        image_config = ai_config.get("image_analysis", {})
+        if image_config.get("enabled", False):
+            api_key = ai_config.get("openai_api_key", "")
+            if api_key and api_key != "YOUR_OPENAI_API_KEY":
+                try:
+                    model = image_config.get("model", "gpt-4o")
+                    image_analyzer = ImageAnalyzer(api_key=api_key, model=model)
+                    logger.info(f"AI画像分析が有効になっています (model: {model})")
+                except Exception as e:
+                    logger.error(f"ImageAnalyzer初期化エラー: {e}")
+            else:
+                logger.warning("AI画像分析が有効ですが、OpenAI APIキーが設定されていません")
+        else:
+            logger.info("AI画像分析は無効です")
+    else:
+        if not IMAGE_ANALYZER_AVAILABLE:
+            logger.info("AI画像分析モジュールが利用できません")
+        else:
+            logger.info("AI機能は無効です")
 
     # プロセスチェック間隔
     check_interval = args.interval if args.interval else config.get("monitoring", {}).get("check_interval", 5)

@@ -116,9 +116,20 @@ class ImageAnalyzer:
             content = response.choices[0].message.content
             logger.debug(f"API response: {content}")
 
-            # JSONとして解析
+            # JSONとして解析（マークダウンコードブロックを除去）
             import json
-            result = json.loads(content)
+            import re
+
+            # マークダウンコードブロック（```json ... ``` または ``` ... ```）を除去
+            json_content = content.strip()
+            if json_content.startswith('```'):
+                # コードブロックの開始を除去
+                json_content = re.sub(r'^```(?:json)?\s*\n?', '', json_content)
+                # コードブロックの終了を除去
+                json_content = re.sub(r'\n?```\s*$', '', json_content)
+                json_content = json_content.strip()
+
+            result = json.loads(json_content)
 
             # 必須フィールドの検証
             if not all(key in result for key in ['has_other_avatars', 'avatar_count', 'confidence', 'description']):
