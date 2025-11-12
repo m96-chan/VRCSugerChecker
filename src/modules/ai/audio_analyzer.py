@@ -141,8 +141,17 @@ class AudioAnalyzer:
             content = response.choices[0].message.content
             logger.debug(f"API response: {content}")
 
-            # JSONとして解析
+            # JSONコードブロックを除去（```json ... ```で囲まれている場合）
             import json
+            import re
+
+            # ```json ... ``` または ``` ... ``` を除去
+            if content.strip().startswith('```'):
+                # コードブロックを除去
+                content = re.sub(r'^```(?:json)?\s*\n', '', content.strip(), flags=re.MULTILINE)
+                content = re.sub(r'\n```\s*$', '', content.strip(), flags=re.MULTILINE)
+                logger.debug(f"Removed code block markers, cleaned content: {content[:100]}...")
+
             result = json.loads(content)
 
             # 必須フィールドの検証
