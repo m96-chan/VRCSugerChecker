@@ -584,25 +584,54 @@ def analyze_audio_recordings(specific_world_id: Optional[str] = None, specific_t
             logger.info(f"  フィルタ: world_id={specific_world_id}, timestamp={specific_timestamp}")
         print("\n[AI音声分析] 録音された音声ファイルを分析中...")
 
-        # 分割ファイルをグループ化して処理
-        results = audio_analyzer.process_audio_directory(audio_dir, pattern="*.m4a")
-
-        if not results:
+        # ファイルリストを取得
+        audio_paths = list(audio_dir.glob("*.m4a"))
+        if not audio_paths:
             logger.info("分析対象の音声ファイルがありませんでした")
             print("[AI音声分析] 分析対象のファイルがありませんでした")
             return
 
-        # フィルタリング（特定のワールド/タイムスタンプ）
+        logger.info(f"Found {len(audio_paths)} audio files in {audio_dir}")
+
+        # 分割ファイルをグループ化
+        groups = audio_analyzer.group_split_files(audio_paths)
+        logger.info(f"Grouped into {len(groups)} recording sessions")
+
+        # フィルタリング（処理前に実行）
         if specific_world_id or specific_timestamp:
-            filtered_results = {}
-            for group_name, result in results.items():
+            logger.info(f"音声分析フィルタ: world_id={specific_world_id}, timestamp={specific_timestamp}")
+            filtered_groups = {}
+            for group_name, files in groups.items():
                 # グループ名パターン: {world_id}-{timestamp}
-                if specific_world_id and not group_name.startswith(specific_world_id):
-                    continue
-                if specific_timestamp and specific_timestamp not in group_name:
-                    continue
-                filtered_results[group_name] = result
-            results = filtered_results
+                match_world = True
+                match_timestamp = True
+
+                if specific_world_id:
+                    match_world = group_name.startswith(specific_world_id)
+                    logger.debug(f"  {group_name}: world_id match={match_world} (looking for '{specific_world_id}')")
+
+                if specific_timestamp:
+                    match_timestamp = specific_timestamp in group_name
+                    logger.debug(f"  {group_name}: timestamp match={match_timestamp} (looking for '{specific_timestamp}')")
+
+                if match_world and match_timestamp:
+                    filtered_groups[group_name] = files
+                    logger.info(f"  ✓ {group_name}: フィルタを通過")
+                else:
+                    logger.info(f"  ✗ {group_name}: フィルタでスキップ")
+
+            groups = filtered_groups
+            logger.info(f"フィルタ後: {len(groups)}個のセッション")
+
+        if not groups:
+            logger.info("フィルタ後、分析対象のファイルがありませんでした")
+            return
+
+        # フィルタリング済みのグループのみを処理
+        results = {}
+        for group_name, files in groups.items():
+            logger.info(f"Processing group '{group_name}' with {len(files)} parts")
+            results[group_name] = audio_analyzer.process_split_audio_group(files)
 
         if not results:
             logger.info("フィルタ後、分析対象のファイルがありませんでした")
