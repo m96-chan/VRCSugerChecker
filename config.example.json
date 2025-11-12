@@ -1,17 +1,26 @@
 {
   "discord": {
-    "enabled": false,
-    "webhook_url": "https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN",
-    "username": "VRChat Sugar Checker",
-    "avatar_url": "",
-    "notifications": {
-      "vrchat_started": true,
-      "vrchat_stopped": true,
-      "instance_info": true,
-      "instance_changed": true,
-      "user_joined": false,
-      "user_left": false
-    }
+    "webhooks": [
+      {
+        "name": "main",
+        "enabled": false,
+        "webhook_url": "https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN",
+        "username": "VRChat Sugar Checker",
+        "avatar_url": "",
+        "notifications": {
+          "vrchat_started": true,
+          "vrchat_stopped": true,
+          "instance_info": true,
+          "instance_changed": true,
+          "user_joined": false,
+          "user_left": false,
+          "screenshot": true,
+          "avatar_detection": true,
+          "upload": true,
+          "audio_analysis": false
+        }
+      }
+    ]
   },
   "monitoring": {
     "check_interval": 5,
@@ -41,7 +50,6 @@
     "auto_capture": true,
     "auto_capture_interval": 180,
     "retention_days": 7,
-    "notify_discord": true,
     "avatar_detection": {
       "enabled": false,
       "interval": 5,
@@ -49,7 +57,6 @@
       "mode": "advanced",
       "consecutive_frames": 6,
       "hold_seconds": 6.0,
-      "notify_discord": true,
       "flow_min": 0.15,
       "base_score_threshold": 0.45,
       "warmup_frames": 30
@@ -59,8 +66,7 @@
     "enabled": false,
     "upload_on_exit": true,
     "daily_upload": true,
-    "cleanup_after_upload": true,
-    "notify_discord": true
+    "cleanup_after_upload": true
   },
   "ai": {
     "enabled": false,

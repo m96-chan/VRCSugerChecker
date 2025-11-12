@@ -42,7 +42,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 # グローバル変数
-discord_webhook: Optional[DiscordWebhook] = None
+discord_webhooks: list[DiscordWebhook] = []  # 複数のDiscord Webhookに対応
 screenshot_capture: Optional[ScreenshotCapture] = None
 audio_recorder: Optional[AudioRecorder] = None
 file_uploader: Optional[FileUploader] = None
@@ -53,6 +53,29 @@ last_instance_id: Optional[str] = None
 last_users: Dict[str, str] = {}
 last_world_name: Optional[str] = None
 last_upload_date: Optional[str] = None  # 最後のアップロード日（YYYYMMDD形式）
+
+
+def send_to_webhooks(notification_type: str, send_func, *args, **kwargs):
+    """
+    指定された通知タイプが有効なWebhookにのみ通知を送信
+
+    Args:
+        notification_type: 通知タイプ（例: "vrchat_started", "screenshot", "audio_analysis"）
+        send_func: Webhookの送信メソッド名（文字列）
+        *args, **kwargs: 送信メソッドに渡す引数
+    """
+    if not discord_webhooks:
+        return
+
+    for webhook in discord_webhooks:
+        # Webhookの通知設定を確認
+        if hasattr(webhook, 'notifications') and webhook.notifications.get(notification_type, False):
+            try:
+                method = getattr(webhook, send_func)
+                method(*args, **kwargs)
+                logger.debug(f"Webhook '{webhook.name}' に {notification_type} 通知を送信しました")
+            except Exception as e:
+                logger.error(f"Webhook '{webhook.name}' への通知送信に失敗: {e}")
 
 
 def setup_logging(logs_dir: Path) -> None:
@@ -238,8 +261,7 @@ def monitor_vrchat_process(check_interval=5):
                 log_monitoring_active = True
 
                 # Discord通知
-                if discord_webhook and config.get("discord", {}).get("notifications", {}).get("vrchat_started", False):
-                    discord_webhook.send_vrchat_started()
+                send_to_webhooks("vrchat_started", "send_vrchat_started")
 
                 start_log_monitoring()
 
@@ -251,8 +273,7 @@ def monitor_vrchat_process(check_interval=5):
                 log_monitoring_active = False
 
                 # Discord通知
-                if discord_webhook and config.get("discord", {}).get("notifications", {}).get("vrchat_stopped", False):
-                    discord_webhook.send_vrchat_stopped()
+                send_to_webhooks("vrchat_stopped", "send_vrchat_stopped")
 
                 stop_log_monitoring()
 
@@ -312,14 +333,15 @@ def start_log_monitoring():
             logger.info(f"マイクデバイスを検出: {result['microphone_device']}")
 
         # Discord通知（インスタンス情報）
-        if discord_webhook and config.get("discord", {}).get("notifications", {}).get("instance_info", False):
-            if result['current_instance']:
-                discord_webhook.send_instance_info(
-                    instance_id=result['current_instance'],
-                    world_name=result['current_world'] or "不明",
-                    user_count=len(result['users_in_instance']),
-                    users=result['users_in_instance']
-                )
+        if result['current_instance']:
+            send_to_webhooks(
+                "instance_info",
+                "send_instance_info",
+                instance_id=result['current_instance'],
+                world_name=result['current_world'] or "不明",
+                user_count=len(result['users_in_instance']),
+                users=result['users_in_instance']
+            )
 
         # 現在の状態を記録
         last_instance_id = result['current_instance']
@@ -345,8 +367,10 @@ def start_log_monitoring():
             if config.get("screenshot", {}).get("on_vrchat_start", False):
                 screenshot_path = screenshot_capture.capture_vrchat_window(prefix="vrchat", reason="start")
                 # Discordに通知
-                if screenshot_path and discord_webhook and config.get("screenshot", {}).get("notify_discord", True):
-                    discord_webhook.send_screenshot_notification(
+                if screenshot_path:
+                    send_to_webhooks(
+                        "screenshot",
+                        "send_screenshot_notification",
                         screenshot_path=str(screenshot_path),
                         world_name=result['current_world'] or "不明",
                         reason="manual"
@@ -423,12 +447,13 @@ def update_log_monitoring():
             print(f"\n[検出] インスタンス変更: {current_instance}")
 
             # Discord通知
-            if discord_webhook and config.get("discord", {}).get("notifications", {}).get("instance_changed", False):
-                discord_webhook.send_instance_changed(
-                    old_instance=last_instance_id,
-                    new_instance=current_instance,
-                    world_name=current_world or "不明"
-                )
+            send_to_webhooks(
+                "instance_changed",
+                "send_instance_changed",
+                old_instance=last_instance_id,
+                new_instance=current_instance,
+                world_name=current_world or "不明"
+            )
 
             # スクリーンショット撮影（インスタンス変更時）
             if screenshot_capture and config.get("screenshot", {}).get("enabled", False):
@@ -438,8 +463,10 @@ def update_log_monitoring():
                         world_name=current_world or "不明"
                     )
                     # Discordに通知
-                    if screenshot_path and discord_webhook:
-                        discord_webhook.send_screenshot_notification(
+                    if screenshot_path:
+                        send_to_webhooks(
+                            "screenshot",
+                            "send_screenshot_notification",
                             screenshot_path=str(screenshot_path),
                             world_name=current_world or "不明",
                             reason="instance_change"
@@ -475,24 +502,19 @@ def update_log_monitoring():
         # ユーザーの参加/退出を検出
         # 最初のログ監視開始時はlast_usersが空なので、通知を送らない
         if current_instance == last_instance_id and last_users:
-            if discord_webhook:
-                notifications = config.get("discord", {}).get("notifications", {})
+            # 新規参加ユーザー
+            for user, user_id in current_users.items():
+                if user not in last_users:
+                    print(f"\n[検出] ユーザー参加: {user}")
+                    logger.info(f"[JOIN] {user} joined {current_world or '不明'}")
+                    send_to_webhooks("user_joined", "send_user_joined", user, user_id, len(current_users))
 
-                # 新規参加ユーザー
-                if notifications.get("user_joined", False):
-                    for user, user_id in current_users.items():
-                        if user not in last_users:
-                            print(f"\n[検出] ユーザー参加: {user}")
-                            logger.info(f"[JOIN] {user} joined {current_world or '不明'}")
-                            discord_webhook.send_user_joined(user, user_id, len(current_users))
-
-                # 退出ユーザー
-                if notifications.get("user_left", False):
-                    for user, user_id in last_users.items():
-                        if user not in current_users:
-                            print(f"\n[検出] ユーザー退出: {user}")
-                            logger.info(f"[LEFT] {user} left {current_world or '不明'}")
-                            discord_webhook.send_user_left(user, user_id, len(current_users))
+            # 退出ユーザー
+            for user, user_id in last_users.items():
+                if user not in current_users:
+                    print(f"\n[検出] ユーザー退出: {user}")
+                    logger.info(f"[LEFT] {user} left {current_world or '不明'}")
+                    send_to_webhooks("user_left", "send_user_left", user, user_id, len(current_users))
 
         # 状態を更新
         last_instance_id = current_instance
@@ -540,15 +562,16 @@ def analyze_screenshot(screenshot_path: Path, world_name: str = "不明"):
                    f"avatar_count={result['avatar_count']}, confidence={result['confidence']}")
 
         # Discord通知
-        if discord_webhook:
-            discord_webhook.send_avatar_detection(
-                screenshot_path=str(screenshot_path),
-                has_avatars=result['has_other_avatars'],
-                avatar_count=result['avatar_count'],
-                confidence=result['confidence'],
-                description=result['description'],
-                world_name=world_name
-            )
+        send_to_webhooks(
+            "avatar_detection",
+            "send_avatar_detection",
+            screenshot_path=str(screenshot_path),
+            has_avatars=result['has_other_avatars'],
+            avatar_count=result['avatar_count'],
+            confidence=result['confidence'],
+            description=result['description'],
+            world_name=world_name
+        )
 
     except Exception as e:
         logger.error(f"画像分析中にエラー: {e}")
@@ -665,38 +688,41 @@ def analyze_audio_recordings(specific_world_id: Optional[str] = None, specific_t
                         logger.info(f"  約束したこと: {', '.join(result['promises'])}")
 
                 # Discord通知（オプション）
-                if discord_webhook and audio_config.get("notify_discord", False):
-                    for group_name, result in results.items():
-                        # group_nameからワールド名を抽出（例: "wrld_xxx-20250113_041049"）
-                        world_name = group_name.split('-')[0] if '-' in group_name else group_name
+                for group_name, result in results.items():
+                    # group_nameからワールド名を抽出（例: "wrld_xxx-20250113_041049"）
+                    world_name = group_name.split('-')[0] if '-' in group_name else group_name
 
-                        try:
-                            # スキップされた場合は会話なし通知
-                            if result.get('skipped'):
-                                skip_reason = result.get('skip_reason', '不明な理由')
-                                discord_webhook.send_no_conversation(
-                                    world_name=world_name,
-                                    reason=skip_reason
-                                )
-                                logger.info(f"[{group_name}] Discord通知を送信しました（会話なし）")
-                                continue
-
-                            # エラーの場合はスキップ
-                            if result.get('error'):
-                                continue
-
-                            # 音声分析結果をDiscordに送信
-                            discord_webhook.send_conversation_summary(
+                    try:
+                        # スキップされた場合は会話なし通知
+                        if result.get('skipped'):
+                            skip_reason = result.get('skip_reason', '不明な理由')
+                            send_to_webhooks(
+                                "audio_analysis",
+                                "send_no_conversation",
                                 world_name=world_name,
-                                topics=result.get('topics', []),
-                                summary=result.get('summary', ''),
-                                decisions=result.get('decisions'),
-                                promises=result.get('promises'),
-                                duration_minutes=None  # 録音時間は今後実装可能
+                                reason=skip_reason
                             )
-                            logger.info(f"[{group_name}] Discord通知を送信しました（会話サマリ）")
-                        except Exception as e:
-                            logger.error(f"[{group_name}] Discord通知の送信に失敗: {e}")
+                            logger.info(f"[{group_name}] Discord通知を送信しました（会話なし）")
+                            continue
+
+                        # エラーの場合はスキップ
+                        if result.get('error'):
+                            continue
+
+                        # 音声分析結果をDiscordに送信
+                        send_to_webhooks(
+                            "audio_analysis",
+                            "send_conversation_summary",
+                            world_name=world_name,
+                            topics=result.get('topics', []),
+                            summary=result.get('summary', ''),
+                            decisions=result.get('decisions'),
+                            promises=result.get('promises'),
+                            duration_minutes=None  # 録音時間は今後実装可能
+                        )
+                        logger.info(f"[{group_name}] Discord通知を送信しました（会話サマリ）")
+                    except Exception as e:
+                        logger.error(f"[{group_name}] Discord通知の送信に失敗: {e}")
 
             except Exception as e:
                 logger.error(f"音声分析スレッド内でエラー: {e}")
@@ -782,8 +808,7 @@ def upload_files_to_cloud():
         print(f"[パスワード] ZIP解凍パスワード: {password}")
 
         # Discord通知
-        if discord_webhook and upload_config.get("notify_discord", True):
-            discord_webhook.send_file_upload_complete(upload_results, password)
+        send_to_webhooks("upload", "send_file_upload_complete", upload_results, password)
 
         # 最後のアップロード日を記録
         last_upload_date = datetime.now().strftime("%Y%m%d")
@@ -794,7 +819,7 @@ def upload_files_to_cloud():
 
 def main():
     """メイン処理"""
-    global discord_webhook, screenshot_capture, audio_recorder, file_uploader, image_analyzer, audio_analyzer, config
+    global discord_webhooks, screenshot_capture, audio_recorder, file_uploader, image_analyzer, audio_analyzer, config
 
     # コマンドライン引数のパース
     parser = argparse.ArgumentParser(description='VRChat Sugar Checker - VRChat.exeプロセス監視ツール')
@@ -817,20 +842,58 @@ def main():
     # 設定を読み込む
     config = load_config(config_path)
 
-    # Discord WebHookの初期化
+    # Discord WebHookの初期化（複数対応 + 後方互換性）
     discord_config = config.get("discord", {})
-    if discord_config.get("enabled", False):
+
+    # 新しい設定形式（webhooks配列）をチェック
+    if "webhooks" in discord_config:
+        webhook_configs = discord_config.get("webhooks", [])
+        for webhook_config in webhook_configs:
+            if not webhook_config.get("enabled", False):
+                continue
+
+            webhook_url = webhook_config.get("webhook_url", "")
+            if not webhook_url:
+                logger.warning(f"Webhook '{webhook_config.get('name', '不明')}' にwebhook_urlが設定されていません")
+                continue
+
+            webhook = DiscordWebhook(
+                webhook_url=webhook_url,
+                username=webhook_config.get("username", "VRChat Sugar Checker"),
+                avatar_url=webhook_config.get("avatar_url", "")
+            )
+            # Webhook に通知設定と名前を追加
+            webhook.notifications = webhook_config.get("notifications", {})
+            webhook.name = webhook_config.get("name", "不明")
+            discord_webhooks.append(webhook)
+            logger.info(f"Discord Webhook '{webhook.name}' を有効化しました")
+
+    # 古い設定形式（後方互換性）
+    elif discord_config.get("enabled", False):
         webhook_url = discord_config.get("webhook_url", "")
         if webhook_url:
-            discord_webhook = DiscordWebhook(
+            webhook = DiscordWebhook(
                 webhook_url=webhook_url,
                 username=discord_config.get("username", "VRChat Sugar Checker"),
                 avatar_url=discord_config.get("avatar_url", "")
             )
-            logger.info("Discord通知が有効になっています")
+            # 古い形式の通知設定を新しい形式に変換
+            old_notifications = discord_config.get("notifications", {})
+            webhook.notifications = {
+                **old_notifications,
+                # 古い設定にない通知タイプはデフォルト値を使用
+                "screenshot": config.get("screenshot", {}).get("notify_discord", True),
+                "avatar_detection": config.get("screenshot", {}).get("avatar_detection", {}).get("notify_discord", True),
+                "upload": config.get("upload", {}).get("notify_discord", True),
+                "audio_analysis": config.get("ai", {}).get("audio_analysis", {}).get("notify_discord", False)
+            }
+            webhook.name = "main"
+            discord_webhooks.append(webhook)
+            logger.info("Discord通知が有効になっています（古い設定形式）")
         else:
             logger.warning("Discord通知が有効ですが、webhook_urlが設定されていません")
-    else:
+
+    if not discord_webhooks:
         logger.info("Discord通知は無効です")
 
     # Audio録音の初期化
@@ -861,26 +924,18 @@ def main():
         # Discord通知コールバックを定義（reason別に通知を制御）
         def screenshot_callback(screenshot_path: Path, reason: str):
             """スクリーンショット撮影時のDiscord通知と画像分析コールバック"""
-            # Discord通知（reason別に設定を確認）
-            should_notify = False
-            if discord_webhook:
-                if reason == "auto_capture":
-                    # auto_capture用の設定を確認
-                    should_notify = screenshot_config.get("notify_discord", False)
-                elif reason == "avatar_detected":
-                    # avatar_detection用の設定を確認
-                    avatar_detection_config = screenshot_config.get("avatar_detection", {})
-                    should_notify = avatar_detection_config.get("notify_discord", True)
-                else:
-                    # その他（手動、インスタンス変更など）は従来通り
-                    should_notify = screenshot_config.get("notify_discord", True)
+            # Discord通知（reason別に通知タイプを決定）
+            notification_type = "screenshot"  # デフォルト
+            if reason == "avatar_detected":
+                notification_type = "avatar_detection"
 
-                if should_notify:
-                    discord_webhook.send_screenshot_notification(
-                        screenshot_path=str(screenshot_path),
-                        world_name=last_world_name or "不明",
-                        reason=reason
-                    )
+            send_to_webhooks(
+                notification_type,
+                "send_screenshot_notification",
+                screenshot_path=str(screenshot_path),
+                world_name=last_world_name or "不明",
+                reason=reason
+            )
 
             # 画像分析（自動キャプチャまたはアバター検出の場合）
             if reason in ["auto_capture", "avatar_detected"] and image_analyzer:
