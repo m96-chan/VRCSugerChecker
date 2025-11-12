@@ -2,11 +2,14 @@
 """
 音声解析モジュール
 OpenAI Whisper APIで音声をテキスト化し、GPTで会話内容を分析する
+分割音声ファイル（part1, part2, ...）のグループ処理に対応
 """
 
 import logging
+import re
 from pathlib import Path
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Tuple
+from collections import defaultdict
 from openai import OpenAI
 import sys
 
@@ -270,5 +273,215 @@ class AudioAnalyzer:
         for audio_path in audio_paths:
             logger.info(f"Processing {audio_path.name}...")
             results[audio_path] = self.process_audio_file(audio_path)
+
+        return results
+
+    @staticmethod
+    def group_split_files(audio_paths: List[Path]) -> Dict[str, List[Path]]:
+        """
+        分割音声ファイルをグループ化
+
+        ファイル名パターン: {world_name}-{timestamp}_part{number}.{ext}
+        例: Zone_086-20251113_001549_part1.m4a
+
+        Args:
+            audio_paths: 音声ファイルパスのリスト
+        Returns:
+            Dict[str, List[Path]]: ベース名ごとのファイルリスト（part番号順）
+        """
+        # ファイル名パターン: {base_name}_part{number}.{ext}
+        pattern = re.compile(r'^(.+)_part(\d+)\.[^.]+$')
+
+        groups = defaultdict(list)
+
+        for audio_path in audio_paths:
+            match = pattern.match(audio_path.name)
+            if match:
+                base_name = match.group(1)  # world_name-timestamp
+                part_number = int(match.group(2))
+                groups[base_name].append((part_number, audio_path))
+            else:
+                # part番号がない単一ファイルは独自のグループ
+                groups[audio_path.stem].append((1, audio_path))
+
+        # part番号順にソート
+        sorted_groups = {}
+        for base_name, files in groups.items():
+            files.sort(key=lambda x: x[0])  # part番号でソート
+            sorted_groups[base_name] = [path for _, path in files]
+
+        return sorted_groups
+
+    def process_split_audio_group(self, audio_paths: List[Path]) -> Dict[str, any]:
+        """
+        分割音声ファイルのグループを処理
+
+        各partを個別に文字起こしし、最後に統合して分析
+
+        Args:
+            audio_paths: 同じセッションの分割ファイルリスト（順番に並んでいること）
+        Returns:
+            Dict: 統合された処理結果
+                {
+                    'transcript': str,             # 統合された文字起こし結果
+                    'topics': List[str],           # トピック一覧
+                    'summary': str,                # 会話内容の概要
+                    'decisions': Optional[List[str]],  # 決めたこと
+                    'promises': Optional[List[str]],   # 約束したこと
+                    'parts': List[Dict],           # 各partの詳細結果
+                    'total_parts': int,            # 総part数
+                    'preprocessed': bool,          # 前処理が実行されたか
+                    'skipped': bool,               # スキップされたか
+                    'skip_reason': Optional[str],  # スキップ理由
+                    'error': Optional[str]         # エラーメッセージ
+                }
+        """
+        if not audio_paths:
+            return {
+                'transcript': '',
+                'topics': [],
+                'summary': '',
+                'decisions': None,
+                'promises': None,
+                'parts': [],
+                'total_parts': 0,
+                'preprocessed': False,
+                'skipped': False,
+                'skip_reason': None,
+                'error': 'No audio files provided'
+            }
+
+        logger.info(f"Processing split audio group: {len(audio_paths)} parts")
+
+        # 各partを処理
+        part_results = []
+        combined_transcript = []
+        all_preprocessed = True
+        any_skipped = False
+        skip_reasons = []
+
+        for i, audio_path in enumerate(audio_paths, 1):
+            logger.info(f"Processing part {i}/{len(audio_paths)}: {audio_path.name}")
+
+            # 前処理とスキップチェック
+            preprocessed = False
+            skipped = False
+            skip_reason = None
+            actual_audio_path = audio_path
+
+            if self.enable_preprocessing and self.preprocessor:
+                # 処理すべきかチェック
+                should_process, reason = self.preprocessor.should_process(audio_path)
+                if not should_process:
+                    logger.info(f"Part {i} skipped: {reason}")
+                    skipped = True
+                    skip_reason = reason
+                    any_skipped = True
+                    skip_reasons.append(f"Part {i}: {reason}")
+                    continue
+
+                # 無音除去
+                processed_path = self.preprocessor.preprocess(audio_path, remove_original=False)
+                if processed_path and processed_path != audio_path:
+                    actual_audio_path = processed_path
+                    preprocessed = True
+                    logger.info(f"Using preprocessed audio for part {i}: {actual_audio_path.name}")
+
+            # 文字起こし
+            transcript = self.transcribe_audio(actual_audio_path)
+
+            # 前処理で生成した一時ファイルを削除
+            if preprocessed and actual_audio_path != audio_path:
+                try:
+                    actual_audio_path.unlink()
+                    logger.debug(f"Deleted temporary preprocessed file: {actual_audio_path.name}")
+                except Exception as e:
+                    logger.warning(f"Failed to delete temporary file: {e}")
+
+            if transcript:
+                combined_transcript.append(transcript)
+                part_results.append({
+                    'part': i,
+                    'file': audio_path.name,
+                    'transcript': transcript,
+                    'preprocessed': preprocessed,
+                    'skipped': False
+                })
+            else:
+                logger.warning(f"Failed to transcribe part {i}: {audio_path.name}")
+                part_results.append({
+                    'part': i,
+                    'file': audio_path.name,
+                    'transcript': '',
+                    'preprocessed': preprocessed,
+                    'skipped': False,
+                    'error': 'Transcription failed'
+                })
+
+            all_preprocessed = all_preprocessed and preprocessed
+
+        # 全てスキップされた場合
+        if not combined_transcript:
+            return {
+                'transcript': '',
+                'topics': [],
+                'summary': '全ての音声ファイルがスキップされました' if any_skipped else '音声の文字起こしに失敗しました',
+                'decisions': None,
+                'promises': None,
+                'parts': part_results,
+                'total_parts': len(audio_paths),
+                'preprocessed': all_preprocessed,
+                'skipped': any_skipped,
+                'skip_reason': '; '.join(skip_reasons) if skip_reasons else None,
+                'error': 'All parts skipped or transcription failed'
+            }
+
+        # 統合された文字起こしテキスト
+        full_transcript = '\n\n'.join(combined_transcript)
+        logger.info(f"Combined transcript: {len(full_transcript)} characters from {len(combined_transcript)} parts")
+
+        # 会話内容を分析
+        analysis = self.analyze_conversation(full_transcript)
+        analysis['transcript'] = full_transcript
+        analysis['parts'] = part_results
+        analysis['total_parts'] = len(audio_paths)
+        analysis['preprocessed'] = all_preprocessed
+        analysis['skipped'] = any_skipped
+        analysis['skip_reason'] = '; '.join(skip_reasons) if skip_reasons else None
+
+        return analysis
+
+    def process_audio_directory(self, audio_dir: Path, pattern: str = "*.m4a") -> Dict[str, Dict]:
+        """
+        ディレクトリ内の音声ファイルを処理（分割ファイルをグループ化して処理）
+
+        Args:
+            audio_dir: 音声ファイルが格納されているディレクトリ
+            pattern: ファイル名パターン（デフォルト: *.m4a）
+        Returns:
+            Dict[str, Dict]: グループ名ごとの処理結果
+        """
+        if not audio_dir.exists() or not audio_dir.is_dir():
+            logger.error(f"Audio directory not found: {audio_dir}")
+            return {}
+
+        # ディレクトリ内の音声ファイルを取得
+        audio_paths = list(audio_dir.glob(pattern))
+
+        if not audio_paths:
+            logger.info(f"No audio files found in {audio_dir}")
+            return {}
+
+        logger.info(f"Found {len(audio_paths)} audio files in {audio_dir}")
+
+        # 分割ファイルをグループ化
+        groups = self.group_split_files(audio_paths)
+        logger.info(f"Grouped into {len(groups)} recording sessions")
+
+        # グループごとに処理
+        results = {}
+        for group_name, files in groups.items():
+            logger.info(f"Processing group '{group_name}' with {len(files)} parts")
+            results[group_name] = self.process_split_audio_group(files)
 
         return results

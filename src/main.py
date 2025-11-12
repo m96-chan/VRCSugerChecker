@@ -30,6 +30,13 @@ try:
 except ImportError:
     IMAGE_ANALYZER_AVAILABLE = False
 
+# AI音声分析のインポート（オプショナル）
+try:
+    from ai.audio_analyzer import AudioAnalyzer
+    AUDIO_ANALYZER_AVAILABLE = True
+except ImportError:
+    AUDIO_ANALYZER_AVAILABLE = False
+
 # ロガー設定
 logger = logging.getLogger(__name__)
 
@@ -39,6 +46,7 @@ screenshot_capture: Optional[ScreenshotCapture] = None
 audio_recorder: Optional[AudioRecorder] = None
 file_uploader: Optional[FileUploader] = None
 image_analyzer: Optional['ImageAnalyzer'] = None
+audio_analyzer: Optional['AudioAnalyzer'] = None
 config: Dict = {}
 last_instance_id: Optional[str] = None
 last_users: Dict[str, str] = {}
@@ -523,6 +531,75 @@ def analyze_screenshot(screenshot_path: Path, world_name: str = "不明"):
         traceback.print_exc()
 
 
+def analyze_audio_recordings():
+    """
+    録音された音声ファイルを分析
+    """
+    if not audio_analyzer:
+        return
+
+    ai_config = config.get("ai", {})
+    audio_config = ai_config.get("audio_analysis", {})
+
+    if not audio_config.get("analyze_on_upload", False):
+        logger.info("音声分析がスキップされました（analyze_on_uploadが無効）")
+        return
+
+    try:
+        audio_dir = audio_recorder.audio_dir if audio_recorder else Path("logs/audio")
+        if not audio_dir.exists():
+            logger.warning(f"音声ディレクトリが見つかりません: {audio_dir}")
+            return
+
+        logger.info("音声ファイルの分析を開始します...")
+        print("\n[AI音声分析] 録音された音声ファイルを分析中...")
+
+        # 分割ファイルをグループ化して処理
+        results = audio_analyzer.process_audio_directory(audio_dir, pattern="*.m4a")
+
+        if not results:
+            logger.info("分析対象の音声ファイルがありませんでした")
+            print("[AI音声分析] 分析対象のファイルがありませんでした")
+            return
+
+        logger.info(f"音声分析が完了しました: {len(results)}個のセッション")
+        print(f"[AI音声分析] {len(results)}個のセッションを分析しました")
+
+        # 結果をログに出力
+        for group_name, result in results.items():
+            if result.get('skipped'):
+                logger.info(f"[{group_name}] スキップ: {result.get('skip_reason')}")
+                continue
+
+            if result.get('error'):
+                logger.error(f"[{group_name}] エラー: {result.get('error')}")
+                continue
+
+            logger.info(f"[{group_name}] 分析完了 ({result.get('total_parts', 1)} parts)")
+            logger.info(f"  トピック: {', '.join(result.get('topics', []))}")
+            logger.info(f"  概要: {result.get('summary', '')}")
+
+            if result.get('decisions'):
+                logger.info(f"  決めたこと: {', '.join(result['decisions'])}")
+            if result.get('promises'):
+                logger.info(f"  約束したこと: {', '.join(result['promises'])}")
+
+        # Discord通知（オプション）
+        if discord_webhook and audio_config.get("notify_discord", False):
+            for group_name, result in results.items():
+                if result.get('skipped') or result.get('error'):
+                    continue
+
+                # 音声分析結果をDiscordに送信（将来的に実装）
+                # discord_webhook.send_audio_analysis(group_name, result)
+                pass
+
+    except Exception as e:
+        logger.error(f"音声分析中にエラー: {e}")
+        import traceback
+        traceback.print_exc()
+
+
 def stop_log_monitoring():
     """
     ログ監視を停止
@@ -531,6 +608,10 @@ def stop_log_monitoring():
     if audio_recorder and audio_recorder.is_recording:
         if config.get("audio", {}).get("auto_stop", True):
             audio_recorder.stop_recording()
+
+    # 音声分析を実行（録音停止後）
+    if audio_analyzer:
+        analyze_audio_recordings()
 
     # スクリーンショット自動キャプチャを停止
     if screenshot_capture and screenshot_capture.is_auto_capture_running:
@@ -585,7 +666,7 @@ def upload_files_to_cloud():
 
 def main():
     """メイン処理"""
-    global discord_webhook, screenshot_capture, audio_recorder, file_uploader, image_analyzer, config
+    global discord_webhook, screenshot_capture, audio_recorder, file_uploader, image_analyzer, audio_analyzer, config
 
     # コマンドライン引数のパース
     parser = argparse.ArgumentParser(description='VRChat Sugar Checker - VRChat.exeプロセス監視ツール')
@@ -719,6 +800,37 @@ def main():
             logger.info("AI画像分析モジュールが利用できません")
         else:
             logger.info("AI機能は無効です")
+
+    # AI音声分析の初期化
+    if ai_config.get("enabled", False) and AUDIO_ANALYZER_AVAILABLE:
+        audio_config = ai_config.get("audio_analysis", {})
+        if audio_config.get("enabled", False):
+            api_key = ai_config.get("openai_api_key", "")
+            if api_key and api_key != "YOUR_OPENAI_API_KEY":
+                try:
+                    transcription_model = audio_config.get("transcription_model", "whisper-1")
+                    analysis_model = audio_config.get("analysis_model", "gpt-4o")
+                    preprocessing_config = audio_config.get("preprocessing", {})
+                    enable_preprocessing = preprocessing_config.get("enabled", True)
+
+                    audio_analyzer = AudioAnalyzer(
+                        api_key=api_key,
+                        transcription_model=transcription_model,
+                        analysis_model=analysis_model,
+                        enable_preprocessing=enable_preprocessing
+                    )
+                    logger.info(f"AI音声分析が有効になっています (transcription: {transcription_model}, analysis: {analysis_model}, preprocessing: {enable_preprocessing})")
+                except Exception as e:
+                    logger.error(f"AudioAnalyzer初期化エラー: {e}")
+            else:
+                logger.warning("AI音声分析が有効ですが、OpenAI APIキーが設定されていません")
+        else:
+            logger.info("AI音声分析は無効です")
+    else:
+        if not AUDIO_ANALYZER_AVAILABLE:
+            logger.info("AI音声分析モジュールが利用できません")
+        else:
+            logger.info("AI機能は無効です（音声分析）")
 
     # プロセスチェック間隔
     check_interval = args.interval if args.interval else config.get("monitoring", {}).get("check_interval", 5)
