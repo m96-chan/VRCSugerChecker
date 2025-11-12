@@ -318,7 +318,14 @@ def start_log_monitoring():
         # スクリーンショット撮影（VRChat起動時）
         if screenshot_capture and config.get("screenshot", {}).get("enabled", False):
             if config.get("screenshot", {}).get("on_vrchat_start", False):
-                screenshot_capture.capture_vrchat_window(prefix="vrchat", reason="start")
+                screenshot_path = screenshot_capture.capture_vrchat_window(prefix="vrchat", reason="start")
+                # Discordに通知
+                if screenshot_path and discord_webhook and config.get("screenshot", {}).get("notify_discord", True):
+                    discord_webhook.send_screenshot_notification(
+                        screenshot_path=str(screenshot_path),
+                        world_name=result['current_world'] or "不明",
+                        reason="manual"
+                    )
 
             # 定期的な自動キャプチャを開始
             if config.get("screenshot", {}).get("auto_capture", False):
@@ -376,10 +383,17 @@ def update_log_monitoring():
             # スクリーンショット撮影（インスタンス変更時）
             if screenshot_capture and config.get("screenshot", {}).get("enabled", False):
                 if config.get("screenshot", {}).get("on_instance_change", False):
-                    screenshot_capture.capture_on_instance_change(
+                    screenshot_path = screenshot_capture.capture_on_instance_change(
                         instance_id=current_instance,
                         world_name=current_world or "不明"
                     )
+                    # Discordに通知
+                    if screenshot_path and discord_webhook:
+                        discord_webhook.send_screenshot_notification(
+                            screenshot_path=str(screenshot_path),
+                            world_name=current_world or "不明",
+                            reason="instance_change"
+                        )
 
         # Audio録音の停止・開始（ワールド変更時）
         if audio_recorder and config.get("audio", {}).get("enabled", False) and world_changed:
@@ -542,7 +556,18 @@ def main():
     # スクリーンショットキャプチャの初期化
     screenshot_config = config.get("screenshot", {})
     if screenshot_config.get("enabled", False):
-        screenshot_capture = ScreenshotCapture(logs_dir)
+        # Discord通知コールバックを定義
+        screenshot_callback = None
+        if discord_webhook and screenshot_config.get("notify_discord", True):
+            def screenshot_callback(screenshot_path: Path, reason: str):
+                """スクリーンショット撮影時のDiscord通知コールバック"""
+                discord_webhook.send_screenshot_notification(
+                    screenshot_path=str(screenshot_path),
+                    world_name=last_world_name or "不明",
+                    reason=reason
+                )
+
+        screenshot_capture = ScreenshotCapture(logs_dir, screenshot_callback=screenshot_callback)
         logger.info("スクリーンショット撮影が有効になっています")
 
         # 古いスクリーンショットのクリーンアップ

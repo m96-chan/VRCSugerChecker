@@ -221,31 +221,51 @@ class FileUploader:
         for attempt in range(1, max_retries + 1):
             try:
                 with open(file_path, 'rb') as f:
+                    # file.io の最新API仕様に合わせて修正
+                    # expires パラメータは URL パラメータとして渡す
                     files = {'file': (file_path.name, f)}
-                    data = {'expires': expires}
+
+                    # expiresをURLパラメータとして追加
+                    params = {}
+                    if expires:
+                        params['expires'] = expires
 
                     response = requests.post(
                         self.fileio_api,
                         files=files,
-                        data=data,
+                        params=params,
                         timeout=300  # 5分タイムアウト
                     )
 
-                    if response.status_code == 200:
-                        result = response.json()
-                        if result.get('success'):
-                            link = result.get('link')
-                            key = result.get('key')
-                            logger.info(f"Upload successful: {link}")
-                            return {
-                                'success': True,
-                                'link': link,
-                                'key': key,
-                                'file_name': file_path.name,
-                                'file_size_mb': file_size_mb
-                            }
-                        else:
-                            logger.error(f"Upload failed: {result.get('message', 'Unknown error')}")
+                    # レスポンスのデバッグ情報を出力
+                    logger.info(f"Response status: {response.status_code}")
+                    logger.info(f"Response headers: {dict(response.headers)}")
+                    logger.info(f"Response content: {response.text[:1000]}")
+
+                    # ステータスコードが200-299の範囲なら成功
+                    if 200 <= response.status_code < 300:
+                        try:
+                            result = response.json()
+                            logger.info(f"Parsed JSON response: {result}")
+
+                            # success フィールドの確認（存在しない場合もある）
+                            if result.get('success', True) and result.get('link'):
+                                link = result.get('link')
+                                key = result.get('key')
+                                logger.info(f"Upload successful: {link}")
+                                return {
+                                    'success': True,
+                                    'link': link,
+                                    'key': key,
+                                    'file_name': file_path.name,
+                                    'file_size_mb': file_size_mb
+                                }
+                            else:
+                                error_msg = result.get('message') or result.get('error') or 'Unknown error'
+                                logger.error(f"Upload failed: {error_msg}")
+                        except ValueError as json_err:
+                            logger.error(f"Failed to parse JSON response: {json_err}")
+                            logger.error(f"Response content: {response.text}")
                     else:
                         logger.error(f"Upload failed with status {response.status_code}: {response.text}")
 

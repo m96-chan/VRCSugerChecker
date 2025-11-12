@@ -14,7 +14,7 @@ import time
 import threading
 from pathlib import Path
 from datetime import datetime
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Callable
 import subprocess
 
 # Win32 API imports
@@ -36,17 +36,19 @@ logger = logging.getLogger(__name__)
 class ScreenshotCapture:
     """スクリーンショット撮影クラス"""
 
-    def __init__(self, logs_dir: Path):
+    def __init__(self, logs_dir: Path, screenshot_callback: Optional[Callable[[Path, str], None]] = None):
         """
         初期化
         Args:
             logs_dir: ログディレクトリのパス（スクリーンショット保存先）
+            screenshot_callback: スクリーンショット撮影時のコールバック関数 (screenshot_path, reason) -> None
         """
         self.logs_dir = logs_dir
         self.is_auto_capture_running = False
         self.auto_capture_thread: Optional[threading.Thread] = None
         self.auto_capture_interval = 180  # 3分 = 180秒
         self._stop_event = threading.Event()
+        self.screenshot_callback = screenshot_callback
 
         # スクリーンショット保存用のサブディレクトリを作成
         self.screenshots_dir = logs_dir / "screenshots"
@@ -346,7 +348,9 @@ Write-Host "Screenshot saved"
         自動キャプチャのループ（内部メソッド）
         """
         # 最初のキャプチャ（即座に実行）
-        self.capture_vrchat_window(prefix="vrchat", reason="auto")
+        screenshot_path = self.capture_vrchat_window(prefix="vrchat", reason="auto")
+        if screenshot_path and self.screenshot_callback:
+            self.screenshot_callback(screenshot_path, "auto_capture")
 
         while not self._stop_event.is_set():
             # 指定された間隔だけ待機（1秒ごとにチェック）
@@ -357,7 +361,9 @@ Write-Host "Screenshot saved"
 
             # 自動キャプチャを実行
             if not self._stop_event.is_set():
-                self.capture_vrchat_window(prefix="vrchat", reason="auto")
+                screenshot_path = self.capture_vrchat_window(prefix="vrchat", reason="auto")
+                if screenshot_path and self.screenshot_callback:
+                    self.screenshot_callback(screenshot_path, "auto_capture")
 
     def cleanup_old_screenshots(self, days: int = 7) -> None:
         """

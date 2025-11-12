@@ -99,7 +99,8 @@ def parse_vrchat_log(log_file: Path, verbose: bool = False) -> Dict:
     entering_room_pattern = re.compile(r'\[Behaviour\] Entering Room: (.+)')
 
     # [Behaviour] Joining wrld_xxx:instance~region(jp)
-    joining_pattern = re.compile(r'\[Behaviour\] Joining (.+)')
+    # "Joining or Creating Room:" は除外（これはワールド名）
+    joining_pattern = re.compile(r'\[Behaviour\] Joining (wrld_[a-f0-9\-]+:.+)')
 
     # OnPlayerJoined DisplayName (usr_xxx)
     # インスタンスに参加した人（既にいた人も含む）
