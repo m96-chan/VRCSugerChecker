@@ -266,6 +266,10 @@ def monitor_vrchat_process(check_interval=5):
                 last_instance_id = None
                 last_users = {}
 
+                # アバター検出のユーザー数をリセット
+                if screenshot_capture:
+                    screenshot_capture.update_user_count(0)
+
             # ログ監視が有効な場合、ログを定期的に更新
             elif log_monitoring_active:
                 update_log_monitoring()
@@ -320,6 +324,10 @@ def start_log_monitoring():
         last_instance_id = result['current_instance']
         last_users = result['users_in_instance'].copy()
         last_world_name = result['current_world']
+
+        # アバター検出のユーザー数を更新
+        if screenshot_capture:
+            screenshot_capture.update_user_count(len(last_users))
 
         # ワールド情報をログに出力
         if result['current_world'] and result['current_instance']:
@@ -489,6 +497,10 @@ def update_log_monitoring():
         last_instance_id = current_instance
         last_users = current_users.copy()
         last_world_name = current_world
+
+        # アバター検出のユーザー数を更新
+        if screenshot_capture:
+            screenshot_capture.update_user_count(len(last_users))
 
         # 録音の自動分割チェック
         if audio_recorder and audio_recorder.is_recording:

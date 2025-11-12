@@ -72,6 +72,7 @@ class ScreenshotCapture:
         self.avatar_detection_thread: Optional[threading.Thread] = None
         self.avatar_detection_interval = 5  # 5秒
         self._avatar_detection_stop_event = threading.Event()
+        self.current_user_count = 0  # 現在のユーザー数（自分を除く）
 
         # スクリーンショット保存用のサブディレクトリを作成
         self.screenshots_dir = logs_dir / "screenshots"
@@ -584,6 +585,15 @@ Write-Host "Screenshot saved"
 
         logger.info("アバター検出を停止しました")
 
+    def update_user_count(self, user_count: int) -> None:
+        """
+        現在のユーザー数を更新（自分を含む総数）
+        Args:
+            user_count: 現在のユーザー数（自分を含む）
+        """
+        self.current_user_count = user_count
+        logger.debug(f"ユーザー数を更新: {user_count}人")
+
     def _save_detected_frame(self, detected_frame: Image.Image, reason: str = "avatar_detected") -> Optional[Path]:
         """
         検出されたフレームをファイルに保存
@@ -620,6 +630,12 @@ Write-Host "Screenshot saved"
 
         while not self._avatar_detection_stop_event.is_set():
             try:
+                # ユーザー数が1人以下の場合はスキップ（自分しかいない）
+                if self.current_user_count <= 1:
+                    logger.debug(f"ユーザー数が{self.current_user_count}人のため、アバター検出をスキップ")
+                    self._avatar_detection_stop_event.wait(self.avatar_detection_interval)
+                    continue
+
                 # メモリ上にキャプチャ（ファイル保存なし）
                 image = self._capture_to_memory()
 
