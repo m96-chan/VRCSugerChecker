@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
 File Upload モジュール
-0x0.st を使用してファイルをアップロードする機能
+tmpfiles.org を使用してファイルをアップロードする機能
 
 機能:
 - フォルダ構造を保持したZIP圧縮
 - パスワード保護付きZIP
-- 0x0.st へのアップロード（最大512MB、7日間保持）
-- リトライ機能
+- tmpfiles.org へのアップロード（60分後自動削除）
+- リトライ機能とエラーレスポンス保存
 """
 import logging
 import requests
@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 class FileUploader:
-    """0x0.st アップローダークラス"""
+    """tmpfiles.org アップローダークラス"""
 
     def __init__(self, logs_dir: Path):
         """
@@ -44,8 +44,8 @@ class FileUploader:
         self.upload_error_dir = logs_dir / "upload_errors"
         self.upload_error_dir.mkdir(parents=True, exist_ok=True)
 
-        # 0x0.st API エンドポイント
-        self.upload_api = "https://0x0.st"
+        # tmpfiles.org API エンドポイント
+        self.upload_api = "https://tmpfiles.org/api/v1/upload"
 
     def get_all_uploadable_files(self) -> Dict[str, List[Path]]:
         """
@@ -201,94 +201,89 @@ class FileUploader:
             logger.error(f"エラーレスポンスの保存に失敗: {e}")
             return None
 
-    def upload_to_0x0st(
-        self, file_path: Path, expires: int = 168, max_retries: int = 3
+    def upload_to_tmpfiles(
+        self, file_path: Path, max_retries: int = 3
     ) -> Optional[Dict[str, str]]:
         """
-        0x0.st にファイルをアップロード
+        tmpfiles.org にファイルをアップロード（60分後自動削除）
         Args:
             file_path: アップロードするファイルのパス
-            expires: 保持時間（時間単位、デフォルト168時間=7日）
             max_retries: 最大リトライ回数
         Returns:
-            Optional[Dict]: アップロード結果 {"success": True, "link": "..."}
+            Optional[Dict]: アップロード結果 {"success": True, "url": "...", "file_name": "...", "file_size_mb": ...}
         """
         if not file_path.exists():
             logger.error(f"File not found: {file_path}")
             return None
 
         file_size_mb = file_path.stat().st_size / (1024 * 1024)
-
-        # 0x0.stの最大ファイルサイズは512MB
-        if file_size_mb > 512:
-            logger.error(f"File too large: {file_size_mb:.2f} MB (max 512 MB)")
-            return None
-
-        logger.info(f"Uploading {file_path.name} ({file_size_mb:.2f} MB) to 0x0.st...")
+        logger.info(f"Uploading {file_path.name} ({file_size_mb:.2f} MB) to tmpfiles.org...")
 
         for attempt in range(1, max_retries + 1):
             try:
-                # 0x0.stはシンプルなPOSTリクエスト
+                logger.info(f"Upload attempt {attempt}/{max_retries}")
+
                 with open(file_path, 'rb') as f:
+                    # tmpfiles.orgはシンプルなマルチパート形式
                     files = {
                         'file': (file_path.name, f, 'application/octet-stream')
-                    }
-
-                    # expiresパラメータで保持時間を指定（時間単位）
-                    data = {
-                        'expires': str(expires)
                     }
 
                     response = requests.post(
                         self.upload_api,
                         files=files,
-                        data=data,
-                        timeout=600  # 10分タイムアウト（大きなファイル用）
+                        timeout=600  # 10分タイムアウト
                     )
 
-                    # レスポンスのデバッグ情報を出力
                     logger.info(f"Response status: {response.status_code}")
 
-                    # 0x0.stは200番台で成功、レスポンスはダウンロードURLのテキスト
-                    if 200 <= response.status_code < 300:
-                        download_url = response.text.strip()
-                        logger.info(f"Upload successful: {download_url}")
-                        return {
-                            'success': True,
-                            'link': download_url,
-                            'file_name': file_path.name,
-                            'file_size_mb': file_size_mb,
-                            'expires_hours': expires
-                        }
+                    if response.status_code == 200:
+                        try:
+                            result = response.json()
+                            logger.info(f"Response: {result}")
+
+                            # tmpfiles.orgのレスポンス形式: {"status":"success","data":{"url":"..."}}
+                            if result.get('status') == 'success' and result.get('data', {}).get('url'):
+                                url = result['data']['url']
+                                logger.info(f"Upload successful: {url}")
+                                return {
+                                    'success': True,
+                                    'url': url,
+                                    'file_name': file_path.name,
+                                    'file_size_mb': file_size_mb
+                                }
+                            else:
+                                error_msg = result.get('message', 'Unknown error')
+                                logger.error(f"Upload failed: {error_msg}")
+                        except ValueError as json_err:
+                            logger.error(f"Failed to parse JSON response: {json_err}")
+                            logger.error(f"Response content: {response.text[:500]}")
                     else:
                         logger.error(f"Upload failed with status {response.status_code}")
-                        logger.error(f"Response content: {response.text[:500]}")
-
-                        # エラーレスポンスをファイルに保存
-                        error_file = self._save_error_response(response.text, response.status_code, attempt)
-                        if error_file:
-                            logger.error(f"完全なレスポンスを確認してください: {error_file}")
+                        logger.error(f"Response: {response.text[:500]}")
 
             except requests.exceptions.Timeout:
                 logger.warning(f"Upload timeout (attempt {attempt}/{max_retries})")
             except Exception as e:
                 logger.error(f"Upload error (attempt {attempt}/{max_retries}): {e}")
+                import traceback
+                logger.error(traceback.format_exc())
 
             # リトライ前に少し待つ
             if attempt < max_retries:
                 import time
                 time.sleep(2 ** attempt)  # 指数バックオフ: 2, 4, 8秒
 
+        # 全てのリトライが失敗した場合
         logger.error(f"Upload failed after {max_retries} attempts")
         return None
 
     def process_and_upload_all(
-        self, expires_hours: int = 168, cleanup: bool = True
+        self, cleanup: bool = True
     ) -> Tuple[List[Dict[str, str]], Optional[str]]:
         """
-        すべてのファイルを1つのパスワード保護ZIPにまとめてアップロード
+        すべてのファイルを1つのパスワード保護ZIPにまとめてtmpfiles.orgにアップロード
         Args:
-            expires_hours: 0x0.stの保持時間（時間単位、デフォルト168時間=7日）
             cleanup: アップロード後にファイルを削除するか
         Returns:
             Tuple[List[Dict], Optional[str]]: (アップロード結果のリスト, ZIPパスワード)
@@ -313,9 +308,9 @@ class FileUploader:
             logger.warning("Failed to create archive")
             return [], None
 
-        # 4. 0x0.stにアップロード
+        # 4. tmpfiles.orgにアップロード
         upload_results = []
-        result = self.upload_to_0x0st(archive_path, expires=expires_hours)
+        result = self.upload_to_tmpfiles(archive_path)
         if result:
             # パスワードを結果に追加
             result['password'] = password

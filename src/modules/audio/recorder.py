@@ -407,7 +407,9 @@ class AudioRecorder:
 
             if self._cached_process_loopback and self._cached_vrchat_pid == vrchat_pid:
                 # キャッシュされたオブジェクトを再利用
-                logger.info(f"キャッシュされたProcessLoopbackオブジェクトを再利用 (PID: {vrchat_pid})")
+                logger.info(f"VRChatプロセス (PID: {vrchat_pid}) のみの音声をキャプチャします")
+                logger.info("C++拡張を使用してプロセス固有のキャプチャを試みます")
+                logger.info("キャッシュされたProcessLoopbackオブジェクトを再利用")
                 process_loopback = self._cached_process_loopback
                 is_process_specific = self._cached_is_process_specific
                 format_info = self._cached_format_info

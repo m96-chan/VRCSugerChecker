@@ -47,7 +47,6 @@
     "enabled": false,
     "upload_on_exit": true,
     "daily_upload": true,
-    "expires": "1w",
     "cleanup_after_upload": true,
     "notify_discord": true
   },

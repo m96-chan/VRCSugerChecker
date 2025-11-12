@@ -479,13 +479,13 @@ def upload_files_to_cloud():
         return
 
     logger.info("Starting file upload process...")
-    print("\n[アップロード] ファイルを0x0.stにアップロード中...")
+    print("\n[アップロード] ファイルをtmpfiles.orgにアップロード中...")
+    print("[注意] アップロードされたファイルは60分後に自動削除されます")
 
     # アップロード処理
-    expires_hours = 168  # 0x0.stの保持時間（168時間 = 7日）
     cleanup = upload_config.get("cleanup_after_upload", True)
 
-    upload_results, password = file_uploader.process_and_upload_all(expires_hours=expires_hours, cleanup=cleanup)
+    upload_results, password = file_uploader.process_and_upload_all(cleanup=cleanup)
 
     if upload_results:
         logger.info(f"Successfully uploaded {len(upload_results)} files")

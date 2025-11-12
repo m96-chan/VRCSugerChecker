@@ -415,16 +415,14 @@ class DiscordWebhook:
 
         # アップロード結果（通常は1つのセッションZIP）
         for i, result in enumerate(upload_results, 1):
-            link = result.get('link', '')
+            url = result.get('url', '')  # tmpfiles.orgはurlフィールド
             file_name = result.get('file_name', '')
             file_size_mb = result.get('file_size_mb', 0)
-            expires_hours = result.get('expires_hours', 168)
-            expires_days = expires_hours / 24
 
             field_value = f"**ファイル名:** `{file_name}`\n"
             field_value += f"**サイズ:** {file_size_mb:.2f} MB\n"
-            field_value += f"**ダウンロード:** [0x0.st]({link})\n"
-            field_value += f"**有効期限:** {expires_days:.1f}日間 ({expires_hours}時間)\n"
+            field_value += f"**ダウンロード:** [tmpfiles.org]({url})\n"
+            field_value += f"**有効期限:** 60分間\n"
             field_value += f"**🔐 ZIP解凍パスワード:** `{password}`"
 
             fields.append({
@@ -444,7 +442,7 @@ class DiscordWebhook:
             "fields": fields,
             "timestamp": datetime.utcnow().isoformat(),
             "footer": {
-                "text": "VRChat Sugar Checker | file.io (1週間有効)"
+                "text": "VRChat Sugar Checker | tmpfiles.org (60分間有効)"
             }
         }
 
