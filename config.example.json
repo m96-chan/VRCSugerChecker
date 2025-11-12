@@ -24,6 +24,7 @@
     "auto_start": true,
     "auto_stop": true,
     "retention_days": 7,
+    "split_interval_seconds": 3600,
     "debug": {
       "keep_source_files": false
     }

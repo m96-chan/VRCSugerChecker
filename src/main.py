@@ -434,6 +434,12 @@ def update_log_monitoring():
         last_users = current_users.copy()
         last_world_name = current_world
 
+        # 録音の自動分割チェック
+        if audio_recorder and audio_recorder.is_recording:
+            if audio_recorder._should_split_recording():
+                logger.info("録音時間が分割間隔に達しました。自動分割を実行します...")
+                audio_recorder._split_recording_internal()
+
         # 簡易的な表示
         print(f"\r[更新] インスタンス: {current_instance or '不明'} | ユーザー数: {len(current_users)}人", end="", flush=True)
 
@@ -473,21 +479,22 @@ def upload_files_to_cloud():
         return
 
     logger.info("Starting file upload process...")
-    print("\n[アップロード] ファイルをfile.ioにアップロード中...")
+    print("\n[アップロード] ファイルを0x0.stにアップロード中...")
 
     # アップロード処理
-    expires = upload_config.get("expires", "1w")
+    expires_hours = 168  # 0x0.stの保持時間（168時間 = 7日）
     cleanup = upload_config.get("cleanup_after_upload", True)
 
-    upload_results = file_uploader.process_and_upload_all(expires=expires, cleanup=cleanup)
+    upload_results, password = file_uploader.process_and_upload_all(expires_hours=expires_hours, cleanup=cleanup)
 
     if upload_results:
         logger.info(f"Successfully uploaded {len(upload_results)} files")
         print(f"[完了] {len(upload_results)}個のファイルをアップロードしました")
+        print(f"[パスワード] ZIP解凍パスワード: {password}")
 
         # Discord通知
         if discord_webhook and upload_config.get("notify_discord", True):
-            discord_webhook.send_file_upload_complete(upload_results)
+            discord_webhook.send_file_upload_complete(upload_results, password)
 
         # 最後のアップロード日を記録
         last_upload_date = datetime.now().strftime("%Y%m%d")
@@ -542,8 +549,14 @@ def main():
     if audio_config.get("enabled", False):
         # デバッグ設定を取得
         keep_source_files = audio_config.get("debug", {}).get("keep_source_files", False)
-        audio_recorder = AudioRecorder(logs_dir, keep_source_files=keep_source_files)
+        split_interval_seconds = audio_config.get("split_interval_seconds", 3600)
+        audio_recorder = AudioRecorder(
+            logs_dir,
+            keep_source_files=keep_source_files,
+            split_interval_seconds=split_interval_seconds
+        )
         logger.info("Audio録音が有効になっています")
+        logger.info(f"録音分割間隔: {split_interval_seconds}秒 ({split_interval_seconds/3600:.1f}時間)")
         if keep_source_files:
             logger.info("デバッグモード: wavファイルを保持します")
 
@@ -581,6 +594,9 @@ def main():
     if upload_config.get("enabled", False):
         file_uploader = FileUploader(logs_dir)
         logger.info("ファイルアップロードが有効になっています")
+
+        # 古いエラーレスポンスファイルのクリーンアップ
+        file_uploader.cleanup_old_error_files(days=7)
     else:
         logger.info("ファイルアップロードは無効です")
 

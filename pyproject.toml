@@ -18,6 +18,7 @@ dependencies = [
     "pycaw>=20240210; sys_platform == 'win32'",
     "PyAudioWPatch>=0.2.12.7; sys_platform == 'win32'",
     "pyaudiowpatch>=0.2.12.7",
+    "pyminizip>=0.2.6",
 ]
 
 [tool.uv]

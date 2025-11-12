@@ -396,11 +396,12 @@ class DiscordWebhook:
             return None
 
 
-    def send_file_upload_complete(self, upload_results: list) -> bool:
+    def send_file_upload_complete(self, upload_results: list, password: str) -> bool:
         """
         ファイルアップロード完了通知を送信
         Args:
             upload_results: アップロード結果のリスト
+            password: ZIP解凍パスワード
         Returns:
             bool: 送信成功ならTrue
         """
@@ -412,30 +413,33 @@ class DiscordWebhook:
 
         fields = []
 
-        # 各ワールドのアップロード結果
+        # アップロード結果（通常は1つのセッションZIP）
         for i, result in enumerate(upload_results, 1):
-            world_id = result.get('world_id', '不明')
             link = result.get('link', '')
             file_name = result.get('file_name', '')
             file_size_mb = result.get('file_size_mb', 0)
+            expires_hours = result.get('expires_hours', 168)
+            expires_days = expires_hours / 24
 
-            # ワールドIDを短縮表示（長すぎる場合）
-            display_world_id = world_id if len(world_id) <= 30 else world_id[:27] + "..."
-
-            field_value = f"**ファイル名:** {file_name}\n"
+            field_value = f"**ファイル名:** `{file_name}`\n"
             field_value += f"**サイズ:** {file_size_mb:.2f} MB\n"
-            field_value += f"**ダウンロード:** [file.io]({link})\n"
-            field_value += f"**有効期限:** 1週間"
+            field_value += f"**ダウンロード:** [0x0.st]({link})\n"
+            field_value += f"**有効期限:** {expires_days:.1f}日間 ({expires_hours}時間)\n"
+            field_value += f"**🔐 ZIP解凍パスワード:** `{password}`"
 
             fields.append({
-                "name": f"📦 {i}. {display_world_id}",
+                "name": f"📦 VRChatセッションアーカイブ",
                 "value": field_value,
                 "inline": False
             })
 
+        description = f"VRChatセッションの全ファイルをパスワード保護付きZIPでアップロードしました"
+        if len(upload_results) == 1:
+            description += f"\n合計サイズ: **{total_size_mb:.2f} MB**"
+
         embed = {
             "title": "📤 ファイルアップロード完了",
-            "description": f"**{len(upload_results)}個**のアーカイブをアップロードしました\n合計サイズ: **{total_size_mb:.2f} MB**",
+            "description": description,
             "color": 0x9b59b6,  # 紫色
             "fields": fields,
             "timestamp": datetime.utcnow().isoformat(),

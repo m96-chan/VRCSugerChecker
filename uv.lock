@@ -527,6 +527,12 @@ wheels = [
 ]
 
 [[package]]
+name = "pyminizip"
+version = "0.2.6"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/1b/b4/b5584325a03acfbca05922700ab9195b5875a936dc23960224087088a409/pyminizip-0.2.6.tar.gz", hash = "sha256:0a954dd2a65fd72c8b827b83fb806fb4f301075a6ec43e207d3345ab15843a7a", size = 261210, upload-time = "2021-12-21T02:12:19.134Z" }
+
+[[package]]
 name = "python-dotenv"
 version = "1.2.1"
 source = { registry = "https://pypi.org/simple" }
@@ -676,6 +682,7 @@ dependencies = [
     { name = "pyaudiowpatch", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
     { name = "pycaw", marker = "sys_platform == 'win32'" },
     { name = "pyinstaller", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+    { name = "pyminizip", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
     { name = "pywin32", marker = "sys_platform == 'win32'" },
     { name = "requests", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
     { name = "sounddevice", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
@@ -693,6 +700,7 @@ requires-dist = [
     { name = "pyaudiowpatch", marker = "sys_platform == 'win32'", specifier = ">=0.2.12.7" },
     { name = "pycaw", marker = "sys_platform == 'win32'", specifier = ">=20240210" },
     { name = "pyinstaller", specifier = ">=6.0.0" },
+    { name = "pyminizip", specifier = ">=0.2.6" },
     { name = "pywin32", marker = "sys_platform == 'win32'", specifier = ">=308" },
     { name = "requests", specifier = ">=2.32.5" },
     { name = "sounddevice", specifier = ">=0.4.6" },

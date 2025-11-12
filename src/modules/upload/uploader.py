@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 """
 File Upload モジュール
-file.io を使用してファイルをアップロードする機能
+0x0.st を使用してファイルをアップロードする機能
 
 機能:
-- ワールド毎のフォルダ整理
-- ZIP圧縮
-- file.io へのアップロード
+- フォルダ構造を保持したZIP圧縮
+- パスワード保護付きZIP
+- 0x0.st へのアップロード（最大512MB、7日間保持）
 - リトライ機能
 """
 import logging
 import requests
 import zipfile
+import pyminizip
+import secrets
+import string
 import shutil
 import re
 from pathlib import Path
@@ -23,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 class FileUploader:
-    """file.io アップローダークラス"""
+    """0x0.st アップローダークラス"""
 
     def __init__(self, logs_dir: Path):
         """
@@ -37,99 +40,56 @@ class FileUploader:
         self.upload_temp_dir = logs_dir / "upload_temp"
         self.upload_temp_dir.mkdir(parents=True, exist_ok=True)
 
-        # file.io API エンドポイント
-        self.fileio_api = "https://file.io"
+        # エラーレスポンス保存用ディレクトリ
+        self.upload_error_dir = logs_dir / "upload_errors"
+        self.upload_error_dir.mkdir(parents=True, exist_ok=True)
 
-    def organize_files_by_world(self) -> Dict[str, List[Path]]:
+        # 0x0.st API エンドポイント
+        self.upload_api = "https://0x0.st"
+
+    def get_all_uploadable_files(self) -> Dict[str, List[Path]]:
         """
-        音声ファイル、スクリーンショット、ログファイルをワールド毎に整理
+        アップロード対象のすべてのファイルを取得（フォルダ別に整理）
         Returns:
-            Dict[world_id, [file_paths]]: ワールドID毎のファイルリスト
+            Dict[folder_name, [file_paths]]: フォルダ名毎のファイルリスト
         """
-        world_files = defaultdict(list)
+        all_files = {}
 
-        # 音声ファイルを整理
-        # ファイル名形式: worldID-YYYYMMDD_HHMMSS.m4a
+        # 音声ファイルを取得
         if self.audio_dir.exists():
-            for audio_file in self.audio_dir.glob("*.m4a"):
-                world_id = self._extract_world_id_from_audio(audio_file.name)
-                if world_id:
-                    world_files[world_id].append(audio_file)
+            audio_files = [f for f in self.audio_dir.glob("*.m4a") if f.is_file()]
+            if audio_files:
+                all_files["audio"] = audio_files
+                logger.info(f"Found {len(audio_files)} audio files")
 
-        # スクリーンショットを整理
-        # ファイル名形式: vrchat_*_YYYYMMDD_HHMMSS.png
+        # スクリーンショットを取得
         if self.screenshots_dir.exists():
-            for screenshot in self.screenshots_dir.glob("*.png"):
-                # スクリーンショットは時間帯でグルーピング
-                # 音声ファイルと同じワールドのものを紐付ける（タイムスタンプベース）
-                world_id = self._match_screenshot_to_world(screenshot, world_files)
-                if world_id:
-                    world_files[world_id].append(screenshot)
-                else:
-                    # マッチしない場合は "screenshots" グループに入れる
-                    world_files["screenshots"].append(screenshot)
+            screenshot_files = [f for f in self.screenshots_dir.glob("*.png") if f.is_file()]
+            if screenshot_files:
+                all_files["screenshots"] = screenshot_files
+                logger.info(f"Found {len(screenshot_files)} screenshot files")
 
-        # ログファイルを整理（すべてのアーカイブに含める）
+        # ログファイルを取得
         log_files = self._get_log_files()
         if log_files:
-            # "logs" グループに全ログファイルを追加
-            world_files["logs"] = log_files
+            all_files["logs"] = log_files
+            logger.info(f"Found {len(log_files)} log files")
 
-        return dict(world_files)
+        return all_files
 
-    def _extract_world_id_from_audio(self, filename: str) -> Optional[str]:
+    def _generate_password(self, length: int = 16) -> str:
         """
-        音声ファイル名からワールドIDを抽出
+        ランダムなパスワードを生成
         Args:
-            filename: ファイル名
+            length: パスワードの長さ
         Returns:
-            Optional[str]: ワールドID
+            str: 生成されたパスワード
         """
-        # ファイル名形式: worldID-YYYYMMDD_HHMMSS.m4a
-        match = re.match(r'^(.+?)-\d{8}_\d{6}\.m4a$', filename)
-        if match:
-            return match.group(1)
-        return None
-
-    def _match_screenshot_to_world(
-        self, screenshot: Path, world_files: Dict[str, List[Path]]
-    ) -> Optional[str]:
-        """
-        スクリーンショットを音声ファイルのワールドにマッチング
-        Args:
-            screenshot: スクリーンショットのパス
-            world_files: ワールド毎のファイル辞書
-        Returns:
-            Optional[str]: マッチしたワールドID
-        """
-        # スクリーンショットのタイムスタンプを抽出
-        # ファイル名形式: vrchat_*_YYYYMMDD_HHMMSS.png
-        match = re.search(r'(\d{8}_\d{6})\.png$', screenshot.name)
-        if not match:
-            return None
-
-        screenshot_timestamp_str = match.group(1)
-        try:
-            screenshot_time = datetime.strptime(screenshot_timestamp_str, "%Y%m%d_%H%M%S")
-        except ValueError:
-            return None
-
-        # 各ワールドの音声ファイルと時間比較（前後5分以内）
-        for world_id, files in world_files.items():
-            for file in files:
-                if file.suffix == '.m4a':
-                    # 音声ファイルのタイムスタンプを抽出
-                    audio_match = re.search(r'(\d{8}_\d{6})\.m4a$', file.name)
-                    if audio_match:
-                        try:
-                            audio_time = datetime.strptime(audio_match.group(1), "%Y%m%d_%H%M%S")
-                            # 前後5分以内ならマッチ
-                            if abs((screenshot_time - audio_time).total_seconds()) <= 300:
-                                return world_id
-                        except ValueError:
-                            continue
-
-        return None
+        # 英数字と記号を使用
+        alphabet = string.ascii_letters + string.digits
+        password = ''.join(secrets.choice(alphabet) for _ in range(length))
+        logger.info(f"Generated password with length {length}")
+        return password
 
     def _get_log_files(self) -> List[Path]:
         """
@@ -153,121 +113,161 @@ class FileUploader:
         logger.info(f"Found {len(log_files)} log files to include in upload")
         return log_files
 
-    def create_world_archives(
-        self, world_files: Dict[str, List[Path]], date_str: Optional[str] = None
-    ) -> List[Tuple[str, Path]]:
+    def create_single_archive(
+        self, all_files: Dict[str, List[Path]], password: str, date_str: Optional[str] = None
+    ) -> Optional[Path]:
         """
-        ワールド毎にZIPアーカイブを作成
+        すべてのファイルをパスワード保護付きの1つのZIPアーカイブにまとめる
         Args:
-            world_files: ワールド毎のファイル辞書
+            all_files: フォルダ毎のファイル辞書 {"audio": [...], "screenshots": [...], "logs": [...]}
+            password: ZIPファイルのパスワード
             date_str: 日付文字列（オプション、デフォルトは今日）
         Returns:
-            List[Tuple[world_id, zip_path]]: ワールドIDとZIPファイルパスのリスト
+            Optional[Path]: 作成されたZIPファイルのパス
         """
+        if not all_files:
+            logger.warning("No files to archive")
+            return None
+
         if not date_str:
             date_str = datetime.now().strftime("%Y%m%d")
 
-        archives = []
+        # ZIPファイル名: VRChat_Session_YYYYMMDD.zip
+        zip_filename = f"VRChat_Session_{date_str}.zip"
+        zip_path = self.upload_temp_dir / zip_filename
 
-        for world_id, files in world_files.items():
-            if not files:
-                continue
+        try:
+            total_files = sum(len(files) for files in all_files.values())
+            logger.info(f"Creating password-protected archive with {total_files} files...")
 
-            # ワールドIDを安全なファイル名に変換
-            safe_world_id = self._sanitize_filename(world_id)
+            # pyminizipで圧縮するファイルリストを準備
+            file_list = []
+            arcname_list = []
 
-            # ZIPファイル名: worldID_YYYYMMDD.zip
-            zip_filename = f"{safe_world_id}_{date_str}.zip"
-            zip_path = self.upload_temp_dir / zip_filename
+            for folder_name, files in all_files.items():
+                for file in files:
+                    file_list.append(str(file))
+                    # ZIP内のパス: フォルダ構造を保持
+                    arcname = f"{folder_name}/{file.name}"
+                    arcname_list.append(arcname)
+                    logger.debug(f"Will add to ZIP: {arcname}")
 
-            try:
-                with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                    for file in files:
-                        # ZIP内のパス: ワールドID/ファイル名
-                        arcname = f"{safe_world_id}/{file.name}"
-                        zipf.write(file, arcname=arcname)
-                        logger.debug(f"Added to ZIP: {file.name} -> {arcname}")
+            # pyminizipでパスワード保護付きZIPを作成
+            # compression_level: 0-9 (0=無圧縮, 9=最大圧縮)
+            pyminizip.compress_multiple(
+                file_list,
+                arcname_list,
+                str(zip_path),
+                password,
+                5  # 圧縮レベル5(標準)
+            )
 
-                file_size_mb = zip_path.stat().st_size / (1024 * 1024)
-                logger.info(f"Created archive: {zip_filename} ({file_size_mb:.2f} MB, {len(files)} files)")
-                archives.append((world_id, zip_path))
+            file_size_mb = zip_path.stat().st_size / (1024 * 1024)
+            logger.info(f"Created password-protected archive: {zip_filename} ({file_size_mb:.2f} MB, {total_files} files)")
+            return zip_path
 
-            except Exception as e:
-                logger.error(f"Failed to create archive for {world_id}: {e}")
-                if zip_path.exists():
-                    zip_path.unlink()
+        except Exception as e:
+            logger.error(f"Failed to create archive: {e}")
+            import traceback
+            traceback.print_exc()
+            if zip_path.exists():
+                zip_path.unlink()
+            return None
 
-        return archives
+    def _save_error_response(self, response_text: str, status_code: int, attempt: int) -> Path:
+        """
+        エラーレスポンスをファイルに保存
+        Args:
+            response_text: レスポンス本文
+            status_code: HTTPステータスコード
+            attempt: 試行回数
+        Returns:
+            Path: 保存したファイルのパス
+        """
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        error_filename = f"upload_error_{timestamp}_status{status_code}_attempt{attempt}.html"
+        error_file = self.upload_error_dir / error_filename
 
-    def upload_to_fileio(
-        self, file_path: Path, expires: str = "1w", max_retries: int = 3
+        try:
+            with open(error_file, 'w', encoding='utf-8') as f:
+                f.write(f"<!-- Status Code: {status_code} -->\n")
+                f.write(f"<!-- Attempt: {attempt} -->\n")
+                f.write(f"<!-- Timestamp: {timestamp} -->\n\n")
+                f.write(response_text)
+
+            logger.info(f"エラーレスポンスを保存: {error_file.name}")
+            return error_file
+        except Exception as e:
+            logger.error(f"エラーレスポンスの保存に失敗: {e}")
+            return None
+
+    def upload_to_0x0st(
+        self, file_path: Path, expires: int = 168, max_retries: int = 3
     ) -> Optional[Dict[str, str]]:
         """
-        file.io にファイルをアップロード
+        0x0.st にファイルをアップロード
         Args:
             file_path: アップロードするファイルのパス
-            expires: 有効期限（1d, 1w, 1m, 1y）
+            expires: 保持時間（時間単位、デフォルト168時間=7日）
             max_retries: 最大リトライ回数
         Returns:
-            Optional[Dict]: アップロード結果 {"success": True, "link": "...", "key": "..."}
+            Optional[Dict]: アップロード結果 {"success": True, "link": "..."}
         """
         if not file_path.exists():
             logger.error(f"File not found: {file_path}")
             return None
 
         file_size_mb = file_path.stat().st_size / (1024 * 1024)
-        logger.info(f"Uploading {file_path.name} ({file_size_mb:.2f} MB) to file.io...")
+
+        # 0x0.stの最大ファイルサイズは512MB
+        if file_size_mb > 512:
+            logger.error(f"File too large: {file_size_mb:.2f} MB (max 512 MB)")
+            return None
+
+        logger.info(f"Uploading {file_path.name} ({file_size_mb:.2f} MB) to 0x0.st...")
 
         for attempt in range(1, max_retries + 1):
             try:
+                # 0x0.stはシンプルなPOSTリクエスト
                 with open(file_path, 'rb') as f:
-                    # file.io の最新API仕様に合わせて修正
-                    # expires パラメータは URL パラメータとして渡す
-                    files = {'file': (file_path.name, f)}
+                    files = {
+                        'file': (file_path.name, f, 'application/octet-stream')
+                    }
 
-                    # expiresをURLパラメータとして追加
-                    params = {}
-                    if expires:
-                        params['expires'] = expires
+                    # expiresパラメータで保持時間を指定（時間単位）
+                    data = {
+                        'expires': str(expires)
+                    }
 
                     response = requests.post(
-                        self.fileio_api,
+                        self.upload_api,
                         files=files,
-                        params=params,
-                        timeout=300  # 5分タイムアウト
+                        data=data,
+                        timeout=600  # 10分タイムアウト（大きなファイル用）
                     )
 
                     # レスポンスのデバッグ情報を出力
                     logger.info(f"Response status: {response.status_code}")
-                    logger.info(f"Response headers: {dict(response.headers)}")
-                    logger.info(f"Response content: {response.text[:1000]}")
 
-                    # ステータスコードが200-299の範囲なら成功
+                    # 0x0.stは200番台で成功、レスポンスはダウンロードURLのテキスト
                     if 200 <= response.status_code < 300:
-                        try:
-                            result = response.json()
-                            logger.info(f"Parsed JSON response: {result}")
-
-                            # success フィールドの確認（存在しない場合もある）
-                            if result.get('success', True) and result.get('link'):
-                                link = result.get('link')
-                                key = result.get('key')
-                                logger.info(f"Upload successful: {link}")
-                                return {
-                                    'success': True,
-                                    'link': link,
-                                    'key': key,
-                                    'file_name': file_path.name,
-                                    'file_size_mb': file_size_mb
-                                }
-                            else:
-                                error_msg = result.get('message') or result.get('error') or 'Unknown error'
-                                logger.error(f"Upload failed: {error_msg}")
-                        except ValueError as json_err:
-                            logger.error(f"Failed to parse JSON response: {json_err}")
-                            logger.error(f"Response content: {response.text}")
+                        download_url = response.text.strip()
+                        logger.info(f"Upload successful: {download_url}")
+                        return {
+                            'success': True,
+                            'link': download_url,
+                            'file_name': file_path.name,
+                            'file_size_mb': file_size_mb,
+                            'expires_hours': expires
+                        }
                     else:
-                        logger.error(f"Upload failed with status {response.status_code}: {response.text}")
+                        logger.error(f"Upload failed with status {response.status_code}")
+                        logger.error(f"Response content: {response.text[:500]}")
+
+                        # エラーレスポンスをファイルに保存
+                        error_file = self._save_error_response(response.text, response.status_code, attempt)
+                        if error_file:
+                            logger.error(f"完全なレスポンスを確認してください: {error_file}")
 
             except requests.exceptions.Timeout:
                 logger.warning(f"Upload timeout (attempt {attempt}/{max_retries})")
@@ -283,76 +283,85 @@ class FileUploader:
         return None
 
     def process_and_upload_all(
-        self, expires: str = "1w", cleanup: bool = True
-    ) -> List[Dict[str, str]]:
+        self, expires_hours: int = 168, cleanup: bool = True
+    ) -> Tuple[List[Dict[str, str]], Optional[str]]:
         """
-        すべてのファイルを処理してアップロード
+        すべてのファイルを1つのパスワード保護ZIPにまとめてアップロード
         Args:
-            expires: file.io の有効期限
+            expires_hours: 0x0.stの保持時間（時間単位、デフォルト168時間=7日）
             cleanup: アップロード後にファイルを削除するか
         Returns:
-            List[Dict]: アップロード結果のリスト
+            Tuple[List[Dict], Optional[str]]: (アップロード結果のリスト, ZIPパスワード)
         """
         logger.info("Starting file upload process...")
 
-        # 1. ファイルをワールド毎に整理
-        world_files = self.organize_files_by_world()
-        if not world_files:
+        # 1. アップロード対象のすべてのファイルを取得
+        all_files = self.get_all_uploadable_files()
+        if not all_files:
             logger.info("No files to upload")
-            return []
+            return [], None
 
-        logger.info(f"Organized files into {len(world_files)} groups")
+        total_files = sum(len(files) for files in all_files.values())
+        logger.info(f"Found {total_files} files to upload")
 
-        # 2. ZIPアーカイブを作成
-        archives = self.create_world_archives(world_files)
-        if not archives:
-            logger.warning("No archives created")
-            return []
+        # 2. ランダムなパスワードを生成
+        password = self._generate_password(16)
 
-        # 3. アップロード
+        # 3. パスワード保護付きZIPアーカイブを作成
+        archive_path = self.create_single_archive(all_files, password)
+        if not archive_path:
+            logger.warning("Failed to create archive")
+            return [], None
+
+        # 4. 0x0.stにアップロード
         upload_results = []
-        for world_id, zip_path in archives:
-            result = self.upload_to_fileio(zip_path, expires=expires)
-            if result:
-                result['world_id'] = world_id
-                upload_results.append(result)
+        result = self.upload_to_0x0st(archive_path, expires=expires_hours)
+        if result:
+            # パスワードを結果に追加
+            result['password'] = password
+            upload_results.append(result)
 
-        # 4. クリーンアップ
-        if cleanup and upload_results:
-            self._cleanup_uploaded_files(world_files, archives)
+            # 5. クリーンアップ
+            if cleanup:
+                self._cleanup_uploaded_files(all_files, archive_path)
+        else:
+            logger.error("Upload failed")
 
-        return upload_results
+        return upload_results, password if upload_results else None
 
     def _cleanup_uploaded_files(
-        self, world_files: Dict[str, List[Path]], archives: List[Tuple[str, Path]]
+        self, all_files: Dict[str, List[Path]], archive_path: Path
     ) -> None:
         """
         アップロード済みファイルを削除（ログファイルは除外）
         Args:
-            world_files: ワールド毎のファイル辞書
-            archives: アーカイブのリスト
+            all_files: フォルダ毎のファイル辞書
+            archive_path: 作成したZIPファイルのパス
         """
         # 元のファイルを削除（ログファイルは除外）
-        for world_id, files in world_files.items():
-            # "logs" グループのファイルは削除しない
-            if world_id == "logs":
+        for folder_name, files in all_files.items():
+            # "logs" フォルダのファイルは削除しない
+            if folder_name == "logs":
                 logger.info(f"Skipping deletion of {len(files)} log files")
                 continue
 
+            deleted_count = 0
             for file in files:
                 try:
                     file.unlink()
+                    deleted_count += 1
                     logger.debug(f"Deleted: {file.name}")
                 except Exception as e:
                     logger.error(f"Failed to delete {file.name}: {e}")
 
+            logger.info(f"Deleted {deleted_count} files from {folder_name}/")
+
         # ZIPファイルを削除
-        for _, zip_path in archives:
-            try:
-                zip_path.unlink()
-                logger.debug(f"Deleted archive: {zip_path.name}")
-            except Exception as e:
-                logger.error(f"Failed to delete archive {zip_path.name}: {e}")
+        try:
+            archive_path.unlink()
+            logger.info(f"Deleted archive: {archive_path.name}")
+        except Exception as e:
+            logger.error(f"Failed to delete archive {archive_path.name}: {e}")
 
     def _sanitize_filename(self, name: str) -> str:
         """
@@ -390,3 +399,32 @@ class FileUploader:
             return last_date.date() < today.date()
         except ValueError:
             return True
+
+    def cleanup_old_error_files(self, days: int = 7) -> None:
+        """
+        古いエラーレスポンスファイルを削除
+        Args:
+            days: 保持する日数
+        """
+        if not self.upload_error_dir.exists():
+            return
+
+        cutoff_time = datetime.now() - timedelta(days=days)
+        deleted_count = 0
+
+        for error_file in self.upload_error_dir.iterdir():
+            # .gitkeepは除外
+            if error_file.name == ".gitkeep":
+                continue
+
+            try:
+                file_time = datetime.fromtimestamp(error_file.stat().st_mtime)
+                if file_time < cutoff_time:
+                    error_file.unlink()
+                    deleted_count += 1
+                    logger.debug(f"古いエラーファイルを削除: {error_file.name}")
+            except Exception as e:
+                logger.error(f"エラーファイル削除中にエラー: {error_file.name} - {e}")
+
+        if deleted_count > 0:
+            logger.info(f"古いエラーファイルを{deleted_count}個削除しました")
