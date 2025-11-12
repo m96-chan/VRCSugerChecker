@@ -624,9 +624,22 @@ def analyze_audio_recordings(specific_world_id: Optional[str] = None, specific_t
                 if result.get('skipped') or result.get('error'):
                     continue
 
-                # 音声分析結果をDiscordに送信（将来的に実装）
-                # discord_webhook.send_audio_analysis(group_name, result)
-                pass
+                # 音声分析結果をDiscordに送信
+                try:
+                    # group_nameからワールド名を抽出（例: "wrld_xxx-20250113_041049"）
+                    world_name = group_name.split('-')[0] if '-' in group_name else group_name
+
+                    discord_webhook.send_conversation_summary(
+                        world_name=world_name,
+                        topics=result.get('topics', []),
+                        summary=result.get('summary', ''),
+                        decisions=result.get('decisions'),
+                        promises=result.get('promises'),
+                        duration_minutes=None  # 録音時間は今後実装可能
+                    )
+                    logger.info(f"[{group_name}] Discord通知を送信しました")
+                except Exception as e:
+                    logger.error(f"[{group_name}] Discord通知の送信に失敗: {e}")
 
     except Exception as e:
         logger.error(f"音声分析中にエラー: {e}")
