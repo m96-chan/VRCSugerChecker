@@ -69,6 +69,7 @@ logs/screenshots/*.png
 logs/screenshots/*.jpg
 logs/screenshots/*.jpeg
 logs/upload_temp/*.zip
+logs/upload_errors/*.html
 !logs/.gitkeep
 !logs/audio/.gitkeep
 !logs/upload_temp/.gitkeep
