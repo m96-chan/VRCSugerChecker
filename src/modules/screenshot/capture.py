@@ -32,6 +32,22 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# アバター検出モジュールのインポート（オプショナル）
+try:
+    from .avatar_detector import AvatarDetector
+    AVATAR_DETECTOR_AVAILABLE = True
+except ImportError:
+    AVATAR_DETECTOR_AVAILABLE = False
+    logger.warning("AvatarDetector is not available")
+
+# 高精度アバター検出モジュール（オプショナル）
+try:
+    from .avatar_presence_detector import AvatarPresenceDetector
+    AVATAR_PRESENCE_DETECTOR_AVAILABLE = True
+except ImportError:
+    AVATAR_PRESENCE_DETECTOR_AVAILABLE = False
+    logger.warning("AvatarPresenceDetector is not available")
+
 
 class ScreenshotCapture:
     """スクリーンショット撮影クラス"""
@@ -49,6 +65,13 @@ class ScreenshotCapture:
         self.auto_capture_interval = 180  # 3分 = 180秒
         self._stop_event = threading.Event()
         self.screenshot_callback = screenshot_callback
+
+        # アバター検出機能
+        self.avatar_detector: Optional['AvatarDetector'] = None
+        self.is_avatar_detection_running = False
+        self.avatar_detection_thread: Optional[threading.Thread] = None
+        self.avatar_detection_interval = 5  # 5秒
+        self._avatar_detection_stop_event = threading.Event()
 
         # スクリーンショット保存用のサブディレクトリを作成
         self.screenshots_dir = logs_dir / "screenshots"
@@ -399,6 +422,199 @@ Write-Host "Screenshot saved"
 
         if deleted_count > 0:
             logger.info(f"古いスクリーンショットを{deleted_count}枚削除しました")
+
+    def _capture_to_memory(self) -> Optional[Image.Image]:
+        """
+        VRChatウィンドウをメモリ上にキャプチャ（ファイル保存なし）
+        Returns:
+            Optional[Image.Image]: PIL Image オブジェクト（失敗時はNone）
+        """
+        if not WIN32_AVAILABLE:
+            return None
+
+        try:
+            # VRChatウィンドウが存在するかチェック
+            hwnd = self.find_vrchat_window()
+            if not hwnd:
+                return None
+
+            # ウィンドウの位置とサイズを取得
+            left, top, right, bottom = win32gui.GetWindowRect(hwnd)
+            width = right - left
+            height = bottom - top
+
+            # ウィンドウが最小化されている場合はスキップ
+            if width <= 0 or height <= 0:
+                return None
+
+            # デバイスコンテキストを取得
+            hwndDC = win32gui.GetWindowDC(hwnd)
+            mfcDC = win32ui.CreateDCFromHandle(hwndDC)
+            saveDC = mfcDC.CreateCompatibleDC()
+
+            # ビットマップを作成
+            saveBitMap = win32ui.CreateBitmap()
+            saveBitMap.CreateCompatibleBitmap(mfcDC, width, height)
+            saveDC.SelectObject(saveBitMap)
+
+            # ウィンドウの内容をコピー
+            PW_RENDERFULLCONTENT = 0x00000002
+            result = windll.user32.PrintWindow(hwnd, saveDC.GetSafeHdc(), PW_RENDERFULLCONTENT)
+
+            # 結果が0の場合、通常のBitBltを試す
+            if result == 0:
+                result = saveDC.BitBlt(
+                    (0, 0), (width, height),
+                    mfcDC,
+                    (0, 0),
+                    win32con.SRCCOPY
+                )
+
+            # ビットマップをPIL Imageに変換
+            bmpinfo = saveBitMap.GetInfo()
+            bmpstr = saveBitMap.GetBitmapBits(True)
+
+            img = Image.frombuffer(
+                'RGB',
+                (bmpinfo['bmWidth'], bmpinfo['bmHeight']),
+                bmpstr, 'raw', 'BGRX', 0, 1
+            )
+
+            # クリーンアップ
+            win32gui.DeleteObject(saveBitMap.GetHandle())
+            saveDC.DeleteDC()
+            mfcDC.DeleteDC()
+            win32gui.ReleaseDC(hwnd, hwndDC)
+
+            return img
+
+        except Exception as e:
+            logger.debug(f"メモリキャプチャ中にエラー: {e}")
+            return None
+
+    def start_avatar_detection(
+        self,
+        interval: int = 5,
+        sensitivity: float = 0.10,
+        mode: str = "advanced",
+        consecutive_frames: int = 6,
+        hold_seconds: float = 6.0
+    ) -> None:
+        """
+        アバター検出機能を開始（5秒ごとにスクリーンを監視）
+        Args:
+            interval: 監視間隔（秒）デフォルト: 5秒
+            sensitivity: 変化検出の感度（0.0～1.0）デフォルト: 0.10（10%）
+            mode: 検出モード（"simple" or "advanced"）デフォルト: "advanced"
+            consecutive_frames: 連続検出フレーム数（advancedモード）デフォルト: 6
+            hold_seconds: 検出後の保持時間（advancedモード）デフォルト: 6.0
+        """
+        if self.is_avatar_detection_running:
+            logger.warning("既にアバター検出が実行中です")
+            return
+
+        # モードに応じた検出器を初期化
+        if mode == "advanced":
+            if not AVATAR_PRESENCE_DETECTOR_AVAILABLE:
+                logger.warning("AvatarPresenceDetectorが利用できません。simpleモードにフォールバックします")
+                mode = "simple"
+            else:
+                self.avatar_detector = AvatarPresenceDetector(
+                    sensitivity=sensitivity,
+                    consecutive_frames=consecutive_frames,
+                    hold_seconds=hold_seconds
+                )
+                if not self.avatar_detector.is_available:
+                    logger.warning("OpenCVが利用できないため、アバター検出を開始できません")
+                    return
+                logger.info(f"高精度アバター検出モード: frames={consecutive_frames}, hold={hold_seconds}s")
+
+        if mode == "simple":
+            if not AVATAR_DETECTOR_AVAILABLE:
+                logger.warning("AvatarDetectorが利用できません")
+                return
+
+            self.avatar_detector = AvatarDetector(sensitivity=sensitivity)
+
+            if not self.avatar_detector.is_available:
+                logger.warning("OpenCVが利用できないため、アバター検出を開始できません")
+                return
+            logger.info("シンプルアバター検出モード（フレーム差分）")
+
+        self.avatar_detection_interval = interval
+        self._avatar_detection_stop_event.clear()
+        self.is_avatar_detection_running = True
+
+        # 別スレッドでアバター検出を実行
+        self.avatar_detection_thread = threading.Thread(
+            target=self._avatar_detection_loop,
+            daemon=True
+        )
+        self.avatar_detection_thread.start()
+
+        logger.info(f"アバター検出を開始: {interval}秒おき, 感度={sensitivity*100:.1f}%, mode={mode}")
+
+    def stop_avatar_detection(self) -> None:
+        """
+        アバター検出機能を停止
+        """
+        if not self.is_avatar_detection_running:
+            return
+
+        logger.info("アバター検出を停止します")
+        self._avatar_detection_stop_event.set()
+        self.is_avatar_detection_running = False
+
+        if self.avatar_detection_thread:
+            self.avatar_detection_thread.join(timeout=5)
+
+        # 検出器をリセット
+        if self.avatar_detector:
+            self.avatar_detector.reset()
+
+        logger.info("アバター検出を停止しました")
+
+    def _avatar_detection_loop(self) -> None:
+        """
+        アバター検出ループ（内部メソッド）
+        5秒ごとにスクリーンをキャプチャして変化を検出
+        """
+        logger.info("アバター検出ループを開始")
+
+        while not self._avatar_detection_stop_event.is_set():
+            try:
+                # メモリ上にキャプチャ（ファイル保存なし）
+                image = self._capture_to_memory()
+
+                if image and self.avatar_detector:
+                    # 変化検出
+                    is_changed, change_ratio = self.avatar_detector.detect_change(image)
+
+                    if is_changed:
+                        logger.info(f"アバター出現を検出！変化率: {change_ratio*100:.2f}%")
+
+                        # スクリーンショットを保存
+                        screenshot_path = self.capture_vrchat_window(
+                            prefix="vrchat",
+                            reason="avatar_detected"
+                        )
+
+                        # コールバックを実行
+                        if screenshot_path and self.screenshot_callback:
+                            self.screenshot_callback(screenshot_path, "avatar_detected")
+
+            except Exception as e:
+                logger.error(f"アバター検出ループ中にエラー: {e}")
+                import traceback
+                traceback.print_exc()
+
+            # 指定された間隔だけ待機
+            for _ in range(self.avatar_detection_interval):
+                if self._avatar_detection_stop_event.is_set():
+                    return
+                time.sleep(1)
+
+        logger.info("アバター検出ループを終了")
 
 
 # 使用例とドキュメント

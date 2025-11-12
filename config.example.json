@@ -41,7 +41,15 @@
     "auto_capture": true,
     "auto_capture_interval": 180,
     "retention_days": 7,
-    "notify_discord": true
+    "notify_discord": true,
+    "avatar_detection": {
+      "enabled": false,
+      "interval": 5,
+      "sensitivity": 0.10,
+      "mode": "advanced",
+      "consecutive_frames": 6,
+      "hold_seconds": 6.0
+    }
   },
   "upload": {
     "enabled": false,

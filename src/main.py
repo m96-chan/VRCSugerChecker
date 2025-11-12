@@ -343,6 +343,22 @@ def start_log_monitoring():
                 interval = config.get("screenshot", {}).get("auto_capture_interval", 180)
                 screenshot_capture.start_auto_capture(interval=interval)
 
+            # アバター検出を開始
+            avatar_detection_config = config.get("screenshot", {}).get("avatar_detection", {})
+            if avatar_detection_config.get("enabled", False):
+                detection_interval = avatar_detection_config.get("interval", 5)
+                detection_sensitivity = avatar_detection_config.get("sensitivity", 0.10)
+                detection_mode = avatar_detection_config.get("mode", "advanced")
+                consecutive_frames = avatar_detection_config.get("consecutive_frames", 6)
+                hold_seconds = avatar_detection_config.get("hold_seconds", 6.0)
+                screenshot_capture.start_avatar_detection(
+                    interval=detection_interval,
+                    sensitivity=detection_sensitivity,
+                    mode=detection_mode,
+                    consecutive_frames=consecutive_frames,
+                    hold_seconds=hold_seconds
+                )
+
     except Exception as e:
         print(f"[エラー] ログ監視の開始に失敗: {e}")
 
@@ -514,6 +530,10 @@ def stop_log_monitoring():
     if screenshot_capture and screenshot_capture.is_auto_capture_running:
         screenshot_capture.stop_auto_capture()
 
+    # アバター検出を停止
+    if screenshot_capture and screenshot_capture.is_avatar_detection_running:
+        screenshot_capture.stop_avatar_detection()
+
     print("[動作停止] VRChatログの監視を停止しました")
 
 
@@ -633,8 +653,8 @@ def main():
                     world_name=last_world_name or "不明",
                     reason=reason
                 )
-                # 画像分析（自動キャプチャの場合）
-                if reason == "auto_capture" and image_analyzer:
+                # 画像分析（自動キャプチャまたはアバター検出の場合）
+                if reason in ["auto_capture", "avatar_detected"] and image_analyzer:
                     analyze_screenshot(screenshot_path, world_name=last_world_name or "不明")
 
         screenshot_capture = ScreenshotCapture(logs_dir, screenshot_callback=screenshot_callback)
