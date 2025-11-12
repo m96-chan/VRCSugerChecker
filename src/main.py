@@ -212,6 +212,8 @@ def is_vrchat_running():
             ["powershell.exe", "-Command", "Get-Process -Name VRChat -ErrorAction SilentlyContinue"],
             capture_output=True,
             text=True,
+            encoding='utf-8',
+            errors='replace',
             timeout=5
         )
         # プロセスが存在する場合、出力に "VRChat" が含まれる
@@ -429,6 +431,10 @@ def update_log_monitoring():
         current_instance = result['current_instance']
         current_users = result['users_in_instance']
         current_world = result['current_world']
+        existing_users = result.get('existing_users_on_join', {})
+        leaving_instance = result.get('leaving_instance', False)
+        self_joined_new_instance = result.get('self_joined_new_instance', False)
+        pending_instance_change = result.get('pending_instance_change')
 
         # マイクデバイスの更新
         if audio_recorder and result.get('microphone_device'):
@@ -442,38 +448,52 @@ def update_log_monitoring():
             print(f"\n[検出] ワールド変更: {current_world}")
             logger.info(f"[WORLD] {current_world} (Instance: {current_instance})")
 
-        # インスタンス変更を検出
-        if current_instance and current_instance != last_instance_id and last_instance_id is not None:
-            print(f"\n[検出] インスタンス変更: {current_instance}")
+        # インスタンス変更を検出（自分がJoinしたタイミングで確定）
+        if self_joined_new_instance and pending_instance_change:
+            old_instance = pending_instance_change.get('old_instance')
+            new_instance = pending_instance_change.get('new_instance')
 
-            # Discord通知
-            send_to_webhooks(
-                "instance_changed",
-                "send_instance_changed",
-                old_instance=last_instance_id,
-                new_instance=current_instance,
-                world_name=current_world or "不明"
-            )
+            # 既に通知済みのインスタンスでないか確認
+            if new_instance != last_instance_id:
+                print(f"\n[検出] インスタンス変更（自分のJoin確定）: {new_instance}")
 
-            # スクリーンショット撮影（インスタンス変更時）
-            if screenshot_capture and config.get("screenshot", {}).get("enabled", False):
-                if config.get("screenshot", {}).get("on_instance_change", False):
-                    screenshot_path = screenshot_capture.capture_on_instance_change(
-                        instance_id=current_instance,
-                        world_name=current_world or "不明"
+                # Discord通知（インスタンス変更）
+                send_to_webhooks(
+                    "instance_changed",
+                    "send_instance_changed",
+                    old_instance=old_instance,
+                    new_instance=new_instance,
+                    world_name=current_world or "不明"
+                )
+
+                # Discord通知（既存ユーザーリスト - 別投稿）
+                if existing_users:
+                    send_to_webhooks(
+                        "instance_changed",  # 同じ通知タイプを使用
+                        "send_instance_existing_users",
+                        world_name=current_world or "不明",
+                        users=existing_users
                     )
-                    # Discordに通知
-                    if screenshot_path:
-                        send_to_webhooks(
-                            "screenshot",
-                            "send_screenshot_notification",
-                            screenshot_path=str(screenshot_path),
-                            world_name=current_world or "不明",
-                            reason="instance_change"
+
+                # スクリーンショット撮影（インスタンス変更時）
+                if screenshot_capture and config.get("screenshot", {}).get("enabled", False):
+                    if config.get("screenshot", {}).get("on_instance_change", False):
+                        screenshot_path = screenshot_capture.capture_on_instance_change(
+                            instance_id=current_instance,
+                            world_name=current_world or "不明"
                         )
-                    # 画像分析
-                    if screenshot_path and image_analyzer:
-                        analyze_screenshot(screenshot_path, world_name=current_world or "不明")
+                        # Discordに通知
+                        if screenshot_path:
+                            send_to_webhooks(
+                                "screenshot",
+                                "send_screenshot_notification",
+                                screenshot_path=str(screenshot_path),
+                                world_name=current_world or "不明",
+                                reason="instance_change"
+                            )
+                        # 画像分析
+                        if screenshot_path and image_analyzer:
+                            analyze_screenshot(screenshot_path, world_name=current_world or "不明")
 
         # Audio録音の停止・開始（ワールド変更時）
         if audio_recorder and config.get("audio", {}).get("enabled", False) and world_changed:
@@ -501,6 +521,7 @@ def update_log_monitoring():
 
         # ユーザーの参加/退出を検出
         # 最初のログ監視開始時はlast_usersが空なので、通知を送らない
+        # ワールド移動中（leaving_instance=True）は退出通知をスキップ
         if current_instance == last_instance_id and last_users:
             # 新規参加ユーザー
             for user, user_id in current_users.items():
@@ -509,12 +530,18 @@ def update_log_monitoring():
                     logger.info(f"[JOIN] {user} joined {current_world or '不明'}")
                     send_to_webhooks("user_joined", "send_user_joined", user, user_id, len(current_users))
 
-            # 退出ユーザー
-            for user, user_id in last_users.items():
-                if user not in current_users:
-                    print(f"\n[検出] ユーザー退出: {user}")
-                    logger.info(f"[LEFT] {user} left {current_world or '不明'}")
-                    send_to_webhooks("user_left", "send_user_left", user, user_id, len(current_users))
+            # 退出ユーザー（ワールド移動中はスキップ）
+            if not leaving_instance:
+                for user, user_id in last_users.items():
+                    if user not in current_users:
+                        print(f"\n[検出] ユーザー退出: {user}")
+                        logger.info(f"[LEFT] {user} left {current_world or '不明'}")
+                        send_to_webhooks("user_left", "send_user_left", user, user_id, len(current_users))
+            else:
+                # ワールド移動中の退出はログのみ
+                for user, user_id in last_users.items():
+                    if user not in current_users:
+                        logger.info(f"[LEFT] {user} left {current_world or '不明'} (ワールド移動中 - Discord通知スキップ)")
 
         # 状態を更新
         last_instance_id = current_instance

@@ -82,17 +82,40 @@ def parse_vrchat_log(log_file: Path, verbose: bool = False) -> Dict:
     print(f"[INFO] ファイルサイズ: {log_file.stat().st_size / 1024 / 1024:.2f} MB")
     print(f"[INFO] 最新のインスタンス情報を取得しています...")
 
+    # ステップ1: まずログ全体から自分自身のユーザーIDを取得
+    authenticated_user = None
+    user_authenticated_pattern = re.compile(r'User Authenticated: (.+?) \((usr_[a-f0-9\-]+)\)')
+
+    with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
+        for line in f:
+            match = user_authenticated_pattern.search(line)
+            if match:
+                authenticated_user = match.group(2).strip()
+                print(f"[INFO] 自分自身を検出: {match.group(1).strip()} ({authenticated_user})")
+                break
+
+    if not authenticated_user:
+        print(f"[警告] User Authenticated が見つかりませんでした")
+
     # 現在のインスタンス情報
     current_instance = None
     current_world = None
     microphone_device = None
+    self_joined_new_instance = False  # 自分が新しいインスタンスにJoinしたフラグ
+    pending_instance_change = None  # 保留中のインスタンス変更情報
 
     # インスタンスにいるユーザー（join/leaveを追跡）
     users_in_instance = {}  # {display_name: user_id}
+    existing_users_on_join = {}  # インスタンス変更時に既にいたユーザー（自分より前）
 
     # join/leave履歴
     join_events = []
     leave_events = []
+
+    # インスタンス変更直後の状態
+    just_joined_instance = False
+    temp_joined_users = []  # Joining直後のOnPlayerJoinedを一時的に記録
+    leaving_instance = False  # ワールド移動中フラグ
 
     # 正規表現パターン
     # [Behaviour] Entering Room: worldName
@@ -102,6 +125,10 @@ def parse_vrchat_log(log_file: Path, verbose: bool = False) -> Dict:
     # "Joining or Creating Room:" は除外（これはワールド名）
     joining_pattern = re.compile(r'\[Behaviour\] Joining (wrld_[a-f0-9\-]+:.+)')
 
+    # [Behaviour] Destination set: wrld_xxx:instance~region(jp)
+    # ワールド移動開始
+    destination_set_pattern = re.compile(r'\[Behaviour\] Destination set: (wrld_[a-f0-9\-]+:.+)')
+
     # OnPlayerJoined DisplayName (usr_xxx)
     # インスタンスに参加した人（既にいた人も含む）
     player_joined_pattern = re.compile(r'OnPlayerJoined (.+?) \((usr_[a-f0-9\-]+)\)')
@@ -109,6 +136,10 @@ def parse_vrchat_log(log_file: Path, verbose: bool = False) -> Dict:
     # OnPlayerLeft DisplayName (usr_xxx)
     # 退出した人
     player_left_pattern = re.compile(r'OnPlayerLeft (.+?) \((usr_[a-f0-9\-]+)\)')
+
+    # User Authenticated: DisplayName (usr_xxx)
+    # 自分自身の認証
+    user_authenticated_pattern = re.compile(r'User Authenticated: (.+?) \((usr_[a-f0-9\-]+)\)')
 
     # Microphone device detection
     # uSpeak: SetInputDevice 0 (11 total) 'マイク (Razer BlackShark V2 HS 2.4)'
@@ -135,6 +166,14 @@ def parse_vrchat_log(log_file: Path, verbose: bool = False) -> Dict:
             else:
                 timestamp = None
 
+            # Destination set: ワールド移動開始
+            match = destination_set_pattern.search(line)
+            if match:
+                leaving_instance = True  # ワールド移動中フラグをON
+                if verbose:
+                    time_str = f" [{timestamp_str}]" if timestamp_str else ""
+                    print(f"\n[INFO]{time_str} ワールド移動開始: {match.group(1)}")
+
             # Joining インスタンス検出
             match = joining_pattern.search(line)
             if match:
@@ -142,10 +181,20 @@ def parse_vrchat_log(log_file: Path, verbose: bool = False) -> Dict:
 
                 # 新しいインスタンスに入った場合、ユーザーリストをリセット
                 if current_instance != instance_location:
+                    # インスタンス変更情報を保存（自分のJoinで確定する）
+                    pending_instance_change = {
+                        'old_instance': current_instance,
+                        'new_instance': instance_location
+                    }
+
                     current_instance = instance_location
                     users_in_instance.clear()
+                    existing_users_on_join.clear()
                     join_events.clear()
                     leave_events.clear()
+                    just_joined_instance = True  # インスタンス変更直後フラグ
+                    temp_joined_users = []  # 一時リストをリセット
+                    leaving_instance = False  # ワールド移動完了（Joiningが来たのでOFF）
                     if verbose:
                         time_str = f" [{timestamp_str}]" if timestamp_str else ""
                         print(f"\n[INFO]{time_str} インスタンス変更を検出: {instance_location}")
@@ -159,12 +208,44 @@ def parse_vrchat_log(log_file: Path, verbose: bool = False) -> Dict:
                     time_str = f" [{timestamp_str}]" if timestamp_str else ""
                     print(f"[INFO]{time_str} ワールド名: {current_world}")
 
+            # User Authenticated: 自分自身の認証（ログ全体で1回のみ）
+            match = user_authenticated_pattern.search(line)
+            if match:
+                display_name = match.group(1).strip()
+                user_id = match.group(2).strip()
+                authenticated_user = user_id
+                if verbose:
+                    time_str = f"[{timestamp_str}]" if timestamp_str else ""
+                    print(f"  {time_str} [AUTH] {display_name} ({user_id})")
+
             # OnPlayerJoined: 参加した人（既にいた人も含む）
             match = player_joined_pattern.search(line)
             if match:
                 display_name = match.group(1).strip()
                 user_id = match.group(2).strip()
                 users_in_instance[display_name] = user_id
+
+                # Joining直後なら、一時リストに追加
+                if just_joined_instance:
+                    temp_joined_users.append({
+                        'display_name': display_name,
+                        'user_id': user_id
+                    })
+
+                    # 自分自身のJoinが来たら、既存ユーザーを確定
+                    if authenticated_user and user_id == authenticated_user:
+                        # 自分以外を既存ユーザーとして追加
+                        for temp_user in temp_joined_users:
+                            if temp_user['user_id'] != authenticated_user:
+                                existing_users_on_join[temp_user['display_name']] = temp_user['user_id']
+
+                        just_joined_instance = False  # フラグをリセット
+                        temp_joined_users = []
+                        self_joined_new_instance = True  # 自分がJoinしたフラグ
+                        if verbose:
+                            print(f"[INFO] 既存ユーザー確定: {len(existing_users_on_join)}人 (自分自身のJoin検出)")
+                            print(f"[INFO] インスタンス変更確定 - Discord通知を送信すべき")
+
                 join_events.append({
                     'time': timestamp,
                     'time_str': timestamp_str,
@@ -182,16 +263,22 @@ def parse_vrchat_log(log_file: Path, verbose: bool = False) -> Dict:
                 display_name = match.group(1).strip()
                 user_id = match.group(2).strip()
                 users_in_instance.pop(display_name, None)
-                leave_events.append({
+
+                # ワールド移動中の退出はログに残すが、Discord通知はスキップ
+                leave_event = {
                     'time': timestamp,
                     'time_str': timestamp_str,
                     'user': display_name,
                     'user_id': user_id,
-                    'event': 'leave'
-                })
+                    'event': 'leave',
+                    'skip_discord': leaving_instance  # ワールド移動中ならTrue
+                }
+                leave_events.append(leave_event)
+
                 if verbose:
                     time_str = f"[{timestamp_str}]" if timestamp_str else ""
-                    print(f"  {time_str} [LEFT] {display_name} ({user_id})")
+                    skip_note = " (Discord通知スキップ)" if leaving_instance else ""
+                    print(f"  {time_str} [LEFT] {display_name} ({user_id}){skip_note}")
 
             # Microphone device detection
             match = microphone_pattern.search(line)
@@ -206,6 +293,10 @@ def parse_vrchat_log(log_file: Path, verbose: bool = False) -> Dict:
         'current_world': current_world,
         'microphone_device': microphone_device,
         'users_in_instance': users_in_instance,
+        'existing_users_on_join': existing_users_on_join,  # インスタンス変更時の既存ユーザー
+        'leaving_instance': leaving_instance,  # ワールド移動中フラグ
+        'self_joined_new_instance': self_joined_new_instance,  # 自分が新しいインスタンスにJoinしたフラグ
+        'pending_instance_change': pending_instance_change,  # 保留中のインスタンス変更情報
         'join_events': join_events,
         'leave_events': leave_events
     }

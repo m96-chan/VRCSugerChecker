@@ -328,13 +328,14 @@ class DiscordWebhook:
         }
         return self.send(embed=embed)
 
-    def send_instance_changed(self, old_instance: str, new_instance: str, world_name: str) -> bool:
+    def send_instance_changed(self, old_instance: str, new_instance: str, world_name: str, users: dict = None) -> bool:
         """
         インスタンス変更通知を送信
         Args:
             old_instance: 前のインスタンスID
             new_instance: 新しいインスタンスID
             world_name: ワールド名
+            users: 既にインスタンスにいるユーザー（display_name → user_id）
         Returns:
             bool: 送信成功ならTrue
         """
@@ -362,10 +363,144 @@ class DiscordWebhook:
                 "inline": False
             })
 
+        # 既存ユーザーリストを追加（80人まで、分割対応）
+        if users:
+            user_count = len(users)
+            fields.append({
+                "name": f"👥 既にいるユーザー ({user_count}人)",
+                "value": "―" * 30,
+                "inline": False
+            })
+
+            # ユーザーリストを作成（プロフィールリンク付き）
+            user_links = []
+            for display_name, user_id in users.items():
+                # 表示名を20文字に制限
+                display_name_short = display_name[:20] + "..." if len(display_name) > 20 else display_name
+                user_link = f"[{display_name_short}](https://vrchat.com/home/user/{user_id})"
+                user_links.append(user_link)
+
+            # ユーザーリストを結合（改行区切り）
+            user_list_text = "\n".join(user_links)
+
+            # フィールドの文字数制限を確認（1024文字）
+            # 超える場合は分割
+            if len(user_list_text) <= 900:
+                fields.append({
+                    "name": "一緒にいるユーザー",
+                    "value": user_list_text,
+                    "inline": False
+                })
+            else:
+                # 分割処理
+                current_text = ""
+                field_index = 1
+                for user_link in user_links:
+                    if len(current_text) + len(user_link) + 1 > 900:  # 1文字は改行分
+                        # 現在のフィールドを追加
+                        fields.append({
+                            "name": f"一緒にいるユーザー (続き {field_index})",
+                            "value": current_text,
+                            "inline": False
+                        })
+                        current_text = user_link
+                        field_index += 1
+                    else:
+                        if current_text:
+                            current_text += "\n"
+                        current_text += user_link
+
+                # 最後のフィールドを追加
+                if current_text:
+                    fields.append({
+                        "name": f"一緒にいるユーザー (続き {field_index})",
+                        "value": current_text,
+                        "inline": False
+                    })
+
         embed = {
             "title": "🔄 インスタンス変更",
             "description": f"新しいインスタンスに移動しました",
             "color": 0xf39c12,  # オレンジ色
+            "fields": fields,
+            "timestamp": datetime.utcnow().isoformat(),
+            "footer": {
+                "text": "VRChat Sugar Checker"
+            }
+        }
+        return self.send(embed=embed)
+
+    def send_instance_existing_users(self, world_name: str, users: dict) -> bool:
+        """
+        インスタンス変更時に既にいたユーザーリストを送信（別投稿）
+        Args:
+            world_name: ワールド名
+            users: 既にインスタンスにいたユーザー（display_name → user_id）
+        Returns:
+            bool: 送信成功ならTrue
+        """
+        if not users:
+            return True  # ユーザーがいない場合はスキップ
+
+        user_count = len(users)
+        fields = [
+            {
+                "name": f"👥 既にいたユーザー ({user_count}人)",
+                "value": "―" * 30,
+                "inline": False
+            }
+        ]
+
+        # ユーザーリストを作成（プロフィールリンク付き）
+        user_links = []
+        for display_name, user_id in users.items():
+            # 表示名を20文字に制限
+            display_name_short = display_name[:20] + "..." if len(display_name) > 20 else display_name
+            user_link = f"[{display_name_short}](https://vrchat.com/home/user/{user_id})"
+            user_links.append(user_link)
+
+        # ユーザーリストを結合（改行区切り）
+        user_list_text = "\n".join(user_links)
+
+        # フィールドの文字数制限を確認（1024文字）
+        # 超える場合は分割
+        if len(user_list_text) <= 900:
+            fields.append({
+                "name": "ユーザーリスト",
+                "value": user_list_text,
+                "inline": False
+            })
+        else:
+            # 分割処理
+            current_text = ""
+            field_index = 1
+            for user_link in user_links:
+                if len(current_text) + len(user_link) + 1 > 900:  # 1文字は改行分
+                    # 現在のフィールドを追加
+                    fields.append({
+                        "name": f"ユーザーリスト (続き {field_index})",
+                        "value": current_text,
+                        "inline": False
+                    })
+                    current_text = user_link
+                    field_index += 1
+                else:
+                    if current_text:
+                        current_text += "\n"
+                    current_text += user_link
+
+            # 最後のフィールドを追加
+            if current_text:
+                fields.append({
+                    "name": f"ユーザーリスト (続き {field_index})",
+                    "value": current_text,
+                    "inline": False
+                })
+
+        embed = {
+            "title": "👥 元からいたユーザー",
+            "description": f"{world_name or '不明'} に既にいたユーザーたち",
+            "color": 0x3498db,  # 青色
             "fields": fields,
             "timestamp": datetime.utcnow().isoformat(),
             "footer": {

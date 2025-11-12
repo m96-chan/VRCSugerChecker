@@ -128,6 +128,8 @@ class ScreenshotCapture:
                  "Get-Process -Name VRChat -ErrorAction SilentlyContinue | Select-Object -First 1 MainWindowHandle"],
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
                 timeout=5
             )
 
@@ -305,6 +307,8 @@ Write-Host "Screenshot saved"
                 ["powershell.exe", "-Command", ps_script],
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
                 timeout=10
             )
 

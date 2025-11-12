@@ -1063,6 +1063,8 @@ class AudioRecorder:
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
+                encoding='utf-8',
+                errors='replace',
                 timeout=60
             )
 
@@ -1070,7 +1072,7 @@ class AudioRecorder:
                 logger.info(f"音声ファイルの合成に成功: {merged_filename}")
                 return merged_file
             else:
-                logger.error(f"FFmpegエラー: {result.stderr.decode()}")
+                logger.error(f"FFmpegエラー: {result.stderr}")
                 return None
 
         except Exception as e:

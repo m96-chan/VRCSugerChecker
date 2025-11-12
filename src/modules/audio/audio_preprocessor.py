@@ -34,6 +34,8 @@ class AudioPreprocessor:
             subprocess.run(
                 ["ffmpeg", "-version"],
                 capture_output=True,
+                encoding='utf-8',
+                errors='replace',
                 timeout=5
             )
             return True
@@ -68,6 +70,8 @@ class AudioPreprocessor:
                 cmd,
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
                 timeout=60
             )
 
@@ -120,6 +124,8 @@ class AudioPreprocessor:
                 cmd,
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
                 timeout=10
             )
 
@@ -202,6 +208,8 @@ class AudioPreprocessor:
                 cmd,
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
                 timeout=300  # 5分
             )
 
