@@ -212,10 +212,24 @@ class AudioPreprocessor:
 
                 logger.info(f"Silence removal complete: {original_size:.1f}MB -> {processed_size:.1f}MB "
                           f"(reduced by {reduction:.1f}%)")
+
+                # 前処理後のファイルが極小（元の10%未満）または0の場合は、元のファイルを使用
+                if processed_size < original_size * 0.1:
+                    logger.warning(f"Preprocessed file too small ({processed_size:.1f}MB < {original_size * 0.1:.1f}MB), "
+                                  f"using original file instead")
+                    # 前処理ファイルを削除
+                    try:
+                        output_path.unlink()
+                    except Exception:
+                        pass
+                    return audio_path
+
                 return output_path
             else:
                 logger.error(f"FFmpeg failed: {result.stderr}")
-                return None
+                # 失敗時は元のファイルを返す
+                logger.warning("Preprocessing failed, using original file")
+                return audio_path
 
         except Exception as e:
             logger.error(f"Error removing silence: {e}")

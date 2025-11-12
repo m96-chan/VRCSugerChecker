@@ -443,8 +443,20 @@ def update_log_monitoring():
         if audio_recorder and config.get("audio", {}).get("enabled", False) and world_changed:
             # 現在録音中なら停止
             if audio_recorder.is_recording:
+                # 録音停止前にワールドIDとタイムスタンプを保存
+                previous_world_id = audio_recorder.current_world_id
+                previous_timestamp = audio_recorder.current_timestamp
+
                 logger.info(f"ワールド変更検出: 録音を停止します")
                 audio_recorder.stop_recording()
+
+                # 音声分析を実行（ワールド変更時、録音停止直後）
+                # 前回のワールドのファイルのみを分析
+                if audio_analyzer and previous_world_id and previous_timestamp:
+                    # ワールドIDをファイル名用にサニタイズ
+                    safe_world_id = audio_recorder._sanitize_filename(previous_world_id)
+                    logger.info(f"前回のワールド '{previous_world_id}' の音声を分析します")
+                    analyze_audio_recordings(specific_world_id=safe_world_id, specific_timestamp=previous_timestamp)
 
             # 新しいワールドで録音開始
             if current_world:
@@ -531,9 +543,13 @@ def analyze_screenshot(screenshot_path: Path, world_name: str = "不明"):
         traceback.print_exc()
 
 
-def analyze_audio_recordings():
+def analyze_audio_recordings(specific_world_id: Optional[str] = None, specific_timestamp: Optional[str] = None):
     """
     録音された音声ファイルを分析
+
+    Args:
+        specific_world_id: 特定のワールドIDのファイルのみ分析（Noneの場合は全て）
+        specific_timestamp: 特定のタイムスタンプのファイルのみ分析（Noneの場合は全て）
     """
     if not audio_analyzer:
         return
@@ -552,6 +568,8 @@ def analyze_audio_recordings():
             return
 
         logger.info("音声ファイルの分析を開始します...")
+        if specific_world_id or specific_timestamp:
+            logger.info(f"  フィルタ: world_id={specific_world_id}, timestamp={specific_timestamp}")
         print("\n[AI音声分析] 録音された音声ファイルを分析中...")
 
         # 分割ファイルをグループ化して処理
@@ -560,6 +578,22 @@ def analyze_audio_recordings():
         if not results:
             logger.info("分析対象の音声ファイルがありませんでした")
             print("[AI音声分析] 分析対象のファイルがありませんでした")
+            return
+
+        # フィルタリング（特定のワールド/タイムスタンプ）
+        if specific_world_id or specific_timestamp:
+            filtered_results = {}
+            for group_name, result in results.items():
+                # グループ名パターン: {world_id}-{timestamp}
+                if specific_world_id and not group_name.startswith(specific_world_id):
+                    continue
+                if specific_timestamp and specific_timestamp not in group_name:
+                    continue
+                filtered_results[group_name] = result
+            results = filtered_results
+
+        if not results:
+            logger.info("フィルタ後、分析対象のファイルがありませんでした")
             return
 
         logger.info(f"音声分析が完了しました: {len(results)}個のセッション")
