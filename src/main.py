@@ -663,14 +663,23 @@ def stop_log_monitoring():
     """
     ログ監視を停止
     """
-    # Audio録音を停止
+    # Audio録音を停止（停止前にワールド情報を保存）
+    previous_world_id = None
+    previous_timestamp = None
+
     if audio_recorder and audio_recorder.is_recording:
+        # 録音停止前にワールドIDとタイムスタンプを保存
+        previous_world_id = audio_recorder.current_world_id
+        previous_timestamp = audio_recorder.current_timestamp
+
         if config.get("audio", {}).get("auto_stop", True):
             audio_recorder.stop_recording()
 
-    # 音声分析を実行（録音停止後）
-    if audio_analyzer:
-        analyze_audio_recordings()
+    # 音声分析を実行（最後のワールドのみ）
+    if audio_analyzer and previous_world_id and previous_timestamp:
+        safe_world_id = audio_recorder._sanitize_filename(previous_world_id)
+        logger.info(f"最後のワールド '{previous_world_id}' の音声を分析します")
+        analyze_audio_recordings(specific_world_id=safe_world_id, specific_timestamp=previous_timestamp)
 
     # スクリーンショット自動キャプチャを停止
     if screenshot_capture and screenshot_capture.is_auto_capture_running:
