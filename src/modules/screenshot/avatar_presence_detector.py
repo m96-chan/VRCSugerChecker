@@ -555,10 +555,20 @@ class AvatarPresenceDetector:
         current_time = time.time()
         self.frame_counter += 1
 
-        # フレーム形状を記録
-        if self.frame_shape is None:
-            self.frame_shape = (frame_bgr.shape[0], frame_bgr.shape[1])
+        # フレーム形状を記録（サイズ変更を検出）
+        current_shape = (frame_bgr.shape[0], frame_bgr.shape[1])
+        if self.frame_shape is None or self.frame_shape != current_shape:
+            logger.info(f"フレームサイズ変更を検出: {self.frame_shape} -> {current_shape}")
+            self.frame_shape = current_shape
             self.mask = self._create_default_mask(*self.frame_shape)
+            # サイズ変更時は背景モデルもリセット
+            self.bg_subtractor = cv2.createBackgroundSubtractorMOG2(
+                history=500,
+                varThreshold=16,
+                detectShadows=False
+            )
+            self.mirror_boxes = []  # ミラー情報もリセット
+            self.frame_counter = 0  # ウォームアップを再開
 
         # グレースケール化
         frame_gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
@@ -582,9 +592,14 @@ class AvatarPresenceDetector:
         fg_mask = self.bg_subtractor.apply(frame_bgr, learningRate=0.001)
         fg_mask = cv2.threshold(fg_mask, 200, 255, cv2.THRESH_BINARY)[1]
 
-        # マスク適用
+        # マスク適用（サイズ一致を確認）
         if self.mask is not None:
-            fg_mask = cv2.bitwise_and(fg_mask, self.mask)
+            if fg_mask.shape == self.mask.shape:
+                fg_mask = cv2.bitwise_and(fg_mask, self.mask)
+            else:
+                logger.warning(f"マスクサイズ不一致: fg_mask={fg_mask.shape}, mask={self.mask.shape} - マスクを再生成します")
+                self.mask = self._create_default_mask(fg_mask.shape[0], fg_mask.shape[1])
+                fg_mask = cv2.bitwise_and(fg_mask, self.mask)
 
         # モルフォロジー処理
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
