@@ -9,6 +9,7 @@ import sys
 import argparse
 import logging
 import json
+import threading
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional, Dict
@@ -627,72 +628,90 @@ def analyze_audio_recordings(specific_world_id: Optional[str] = None, specific_t
             logger.info("フィルタ後、分析対象のファイルがありませんでした")
             return
 
-        # フィルタリング済みのグループのみを処理
-        results = {}
-        for group_name, files in groups.items():
-            logger.info(f"Processing group '{group_name}' with {len(files)} parts")
-            results[group_name] = audio_analyzer.process_split_audio_group(files)
+        # 音声分析処理を別スレッドで実行する関数
+        def process_audio_analysis():
+            try:
+                # フィルタリング済みのグループのみを処理
+                results = {}
+                for group_name, files in groups.items():
+                    logger.info(f"Processing group '{group_name}' with {len(files)} parts")
+                    results[group_name] = audio_analyzer.process_split_audio_group(files)
 
-        if not results:
-            logger.info("フィルタ後、分析対象のファイルがありませんでした")
-            return
+                if not results:
+                    logger.info("フィルタ後、分析対象のファイルがありませんでした")
+                    return
 
-        logger.info(f"音声分析が完了しました: {len(results)}個のセッション")
-        print(f"[AI音声分析] {len(results)}個のセッションを分析しました")
+                logger.info(f"音声分析が完了しました: {len(results)}個のセッション")
+                print(f"[AI音声分析] {len(results)}個のセッションを分析しました")
 
-        # 結果をログに出力
-        for group_name, result in results.items():
-            if result.get('skipped'):
-                logger.info(f"[{group_name}] スキップ: {result.get('skip_reason')}")
-                logger.info(f"  → AI分析をスキップしてコストを節約しました")
-                continue
-
-            if result.get('error'):
-                logger.error(f"[{group_name}] エラー: {result.get('error')}")
-                continue
-
-            logger.info(f"[{group_name}] 分析完了 ({result.get('total_parts', 1)} parts)")
-            logger.info(f"  トピック: {', '.join(result.get('topics', []))}")
-            logger.info(f"  概要: {result.get('summary', '')}")
-
-            if result.get('decisions'):
-                logger.info(f"  決めたこと: {', '.join(result['decisions'])}")
-            if result.get('promises'):
-                logger.info(f"  約束したこと: {', '.join(result['promises'])}")
-
-        # Discord通知（オプション）
-        if discord_webhook and audio_config.get("notify_discord", False):
-            for group_name, result in results.items():
-                # group_nameからワールド名を抽出（例: "wrld_xxx-20250113_041049"）
-                world_name = group_name.split('-')[0] if '-' in group_name else group_name
-
-                try:
-                    # スキップされた場合は会話なし通知
+                # 結果をログに出力
+                for group_name, result in results.items():
                     if result.get('skipped'):
-                        skip_reason = result.get('skip_reason', '不明な理由')
-                        discord_webhook.send_no_conversation(
-                            world_name=world_name,
-                            reason=skip_reason
-                        )
-                        logger.info(f"[{group_name}] Discord通知を送信しました（会話なし）")
+                        logger.info(f"[{group_name}] スキップ: {result.get('skip_reason')}")
+                        logger.info(f"  → AI分析をスキップしてコストを節約しました")
                         continue
 
-                    # エラーの場合はスキップ
                     if result.get('error'):
+                        logger.error(f"[{group_name}] エラー: {result.get('error')}")
                         continue
 
-                    # 音声分析結果をDiscordに送信
-                    discord_webhook.send_conversation_summary(
-                        world_name=world_name,
-                        topics=result.get('topics', []),
-                        summary=result.get('summary', ''),
-                        decisions=result.get('decisions'),
-                        promises=result.get('promises'),
-                        duration_minutes=None  # 録音時間は今後実装可能
-                    )
-                    logger.info(f"[{group_name}] Discord通知を送信しました（会話サマリ）")
-                except Exception as e:
-                    logger.error(f"[{group_name}] Discord通知の送信に失敗: {e}")
+                    logger.info(f"[{group_name}] 分析完了 ({result.get('total_parts', 1)} parts)")
+                    logger.info(f"  トピック: {', '.join(result.get('topics', []))}")
+                    logger.info(f"  概要: {result.get('summary', '')}")
+
+                    if result.get('decisions'):
+                        logger.info(f"  決めたこと: {', '.join(result['decisions'])}")
+                    if result.get('promises'):
+                        logger.info(f"  約束したこと: {', '.join(result['promises'])}")
+
+                # Discord通知（オプション）
+                if discord_webhook and audio_config.get("notify_discord", False):
+                    for group_name, result in results.items():
+                        # group_nameからワールド名を抽出（例: "wrld_xxx-20250113_041049"）
+                        world_name = group_name.split('-')[0] if '-' in group_name else group_name
+
+                        try:
+                            # スキップされた場合は会話なし通知
+                            if result.get('skipped'):
+                                skip_reason = result.get('skip_reason', '不明な理由')
+                                discord_webhook.send_no_conversation(
+                                    world_name=world_name,
+                                    reason=skip_reason
+                                )
+                                logger.info(f"[{group_name}] Discord通知を送信しました（会話なし）")
+                                continue
+
+                            # エラーの場合はスキップ
+                            if result.get('error'):
+                                continue
+
+                            # 音声分析結果をDiscordに送信
+                            discord_webhook.send_conversation_summary(
+                                world_name=world_name,
+                                topics=result.get('topics', []),
+                                summary=result.get('summary', ''),
+                                decisions=result.get('decisions'),
+                                promises=result.get('promises'),
+                                duration_minutes=None  # 録音時間は今後実装可能
+                            )
+                            logger.info(f"[{group_name}] Discord通知を送信しました（会話サマリ）")
+                        except Exception as e:
+                            logger.error(f"[{group_name}] Discord通知の送信に失敗: {e}")
+
+            except Exception as e:
+                logger.error(f"音声分析スレッド内でエラー: {e}")
+                import traceback
+                traceback.print_exc()
+
+        # 別スレッドで処理を開始
+        analysis_thread = threading.Thread(
+            target=process_audio_analysis,
+            daemon=True,
+            name=f"AudioAnalysis-{specific_world_id or 'all'}-{specific_timestamp or 'all'}"
+        )
+        analysis_thread.start()
+        logger.info(f"音声分析を別スレッドで開始しました: {len(groups)}個のセッション (world_id={specific_world_id}, timestamp={specific_timestamp})")
+        print(f"[AI音声分析] バックグラウンドで{len(groups)}個のセッションを分析中...")
 
     except Exception as e:
         logger.error(f"音声分析中にエラー: {e}")

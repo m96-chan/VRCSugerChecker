@@ -78,7 +78,7 @@ def parse_vrchat_log(log_file: Path, verbose: bool = False) -> Dict:
     Returns:
         Dict: 解析結果
     """
-    print(f"[INFO] ログファイルを解析中: {log_file.name}")
+    print(f"\n[INFO] ログファイルを解析中: {log_file.name}")
     print(f"[INFO] ファイルサイズ: {log_file.stat().st_size / 1024 / 1024:.2f} MB")
     print(f"[INFO] 最新のインスタンス情報を取得しています...")
 
