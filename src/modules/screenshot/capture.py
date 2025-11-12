@@ -498,7 +498,10 @@ Write-Host "Screenshot saved"
         sensitivity: float = 0.10,
         mode: str = "advanced",
         consecutive_frames: int = 6,
-        hold_seconds: float = 6.0
+        hold_seconds: float = 6.0,
+        flow_min: float = 0.35,
+        base_score_threshold: float = 0.45,
+        warmup_frames: int = 30
     ) -> None:
         """
         アバター検出機能を開始（5秒ごとにスクリーンを監視）
@@ -508,6 +511,9 @@ Write-Host "Screenshot saved"
             mode: 検出モード（"simple" or "advanced"）デフォルト: "advanced"
             consecutive_frames: 連続検出フレーム数（advancedモード）デフォルト: 6
             hold_seconds: 検出後の保持時間（advancedモード）デフォルト: 6.0
+            flow_min: Optical Flow最小閾値（advancedモード）デフォルト: 0.35
+            base_score_threshold: ベーススコア閾値（advancedモード）デフォルト: 0.45
+            warmup_frames: ウォームアップフレーム数（advancedモード）デフォルト: 30
         """
         if self.is_avatar_detection_running:
             logger.warning("既にアバター検出が実行中です")
@@ -522,12 +528,16 @@ Write-Host "Screenshot saved"
                 self.avatar_detector = AvatarPresenceDetector(
                     sensitivity=sensitivity,
                     consecutive_frames=consecutive_frames,
-                    hold_seconds=hold_seconds
+                    hold_seconds=hold_seconds,
+                    flow_min=flow_min,
+                    base_score_threshold=base_score_threshold,
+                    warmup_frames=warmup_frames
                 )
                 if not self.avatar_detector.is_available:
                     logger.warning("OpenCVが利用できないため、アバター検出を開始できません")
                     return
-                logger.info(f"高精度アバター検出モード: frames={consecutive_frames}, hold={hold_seconds}s")
+                logger.info(f"高精度アバター検出モード: frames={consecutive_frames}, hold={hold_seconds}s, "
+                           f"flow_min={flow_min}, base_score={base_score_threshold}, warmup={warmup_frames}")
 
         if mode == "simple":
             if not AVATAR_DETECTOR_AVAILABLE:
@@ -574,6 +584,33 @@ Write-Host "Screenshot saved"
 
         logger.info("アバター検出を停止しました")
 
+    def _save_detected_frame(self, detected_frame: Image.Image, reason: str = "avatar_detected") -> Optional[Path]:
+        """
+        検出されたフレームをファイルに保存
+
+        Args:
+            detected_frame: 検出時のPIL Imageフレーム
+            reason: 保存理由（ファイル名に含める）
+
+        Returns:
+            Path: 保存されたスクリーンショットのパス（失敗時はNone）
+        """
+        try:
+            # ファイル名を生成
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"vrchat_{reason}_{timestamp}.png"
+            screenshot_path = self.screenshots_dir / filename
+
+            # PIL Imageとして保存
+            detected_frame.save(str(screenshot_path), 'PNG')
+            logger.info(f"検出フレームを保存: {filename}")
+
+            return screenshot_path
+
+        except Exception as e:
+            logger.error(f"検出フレームの保存中にエラー: {e}")
+            return None
+
     def _avatar_detection_loop(self) -> None:
         """
         アバター検出ループ（内部メソッド）
@@ -590,14 +627,27 @@ Write-Host "Screenshot saved"
                     # 変化検出
                     is_changed, change_ratio = self.avatar_detector.detect_change(image)
 
-                    if is_changed:
+                    # デバッグ情報から初回検出フラグを取得
+                    debug_info = self.avatar_detector.get_debug_info()
+                    newly_detected = debug_info.get('newly_detected', False)
+
+                    # 初回検出時のみスクリーンショットを保存
+                    if is_changed and newly_detected:
                         logger.info(f"アバター出現を検出！変化率: {change_ratio*100:.2f}%")
 
-                        # スクリーンショットを保存
-                        screenshot_path = self.capture_vrchat_window(
-                            prefix="vrchat",
-                            reason="avatar_detected"
-                        )
+                        # 検出時のフレームを取得
+                        detected_frame = self.avatar_detector.get_detected_frame()
+
+                        if detected_frame:
+                            # 検出したフレームそのものを保存
+                            screenshot_path = self._save_detected_frame(detected_frame, "avatar_detected")
+                        else:
+                            # フレームが取得できない場合は通常のキャプチャ
+                            logger.warning("検出フレームが取得できませんでした。通常キャプチャを実行します")
+                            screenshot_path = self.capture_vrchat_window(
+                                prefix="vrchat",
+                                reason="avatar_detected"
+                            )
 
                         # コールバックを実行
                         if screenshot_path and self.screenshot_callback:

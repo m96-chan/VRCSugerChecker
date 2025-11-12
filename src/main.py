@@ -351,12 +351,18 @@ def start_log_monitoring():
                 detection_mode = avatar_detection_config.get("mode", "advanced")
                 consecutive_frames = avatar_detection_config.get("consecutive_frames", 6)
                 hold_seconds = avatar_detection_config.get("hold_seconds", 6.0)
+                flow_min = avatar_detection_config.get("flow_min", 0.35)
+                base_score_threshold = avatar_detection_config.get("base_score_threshold", 0.45)
+                warmup_frames = avatar_detection_config.get("warmup_frames", 30)
                 screenshot_capture.start_avatar_detection(
                     interval=detection_interval,
                     sensitivity=detection_sensitivity,
                     mode=detection_mode,
                     consecutive_frames=consecutive_frames,
-                    hold_seconds=hold_seconds
+                    hold_seconds=hold_seconds,
+                    flow_min=flow_min,
+                    base_score_threshold=base_score_threshold,
+                    warmup_frames=warmup_frames
                 )
 
     except Exception as e:
@@ -643,19 +649,33 @@ def main():
     # スクリーンショットキャプチャの初期化
     screenshot_config = config.get("screenshot", {})
     if screenshot_config.get("enabled", False):
-        # Discord通知コールバックを定義
-        screenshot_callback = None
-        if discord_webhook and screenshot_config.get("notify_discord", True):
-            def screenshot_callback(screenshot_path: Path, reason: str):
-                """スクリーンショット撮影時のDiscord通知と画像分析コールバック"""
-                discord_webhook.send_screenshot_notification(
-                    screenshot_path=str(screenshot_path),
-                    world_name=last_world_name or "不明",
-                    reason=reason
-                )
-                # 画像分析（自動キャプチャまたはアバター検出の場合）
-                if reason in ["auto_capture", "avatar_detected"] and image_analyzer:
-                    analyze_screenshot(screenshot_path, world_name=last_world_name or "不明")
+        # Discord通知コールバックを定義（reason別に通知を制御）
+        def screenshot_callback(screenshot_path: Path, reason: str):
+            """スクリーンショット撮影時のDiscord通知と画像分析コールバック"""
+            # Discord通知（reason別に設定を確認）
+            should_notify = False
+            if discord_webhook:
+                if reason == "auto_capture":
+                    # auto_capture用の設定を確認
+                    should_notify = screenshot_config.get("notify_discord", False)
+                elif reason == "avatar_detected":
+                    # avatar_detection用の設定を確認
+                    avatar_detection_config = screenshot_config.get("avatar_detection", {})
+                    should_notify = avatar_detection_config.get("notify_discord", True)
+                else:
+                    # その他（手動、インスタンス変更など）は従来通り
+                    should_notify = screenshot_config.get("notify_discord", True)
+
+                if should_notify:
+                    discord_webhook.send_screenshot_notification(
+                        screenshot_path=str(screenshot_path),
+                        world_name=last_world_name or "不明",
+                        reason=reason
+                    )
+
+            # 画像分析（自動キャプチャまたはアバター検出の場合）
+            if reason in ["auto_capture", "avatar_detected"] and image_analyzer:
+                analyze_screenshot(screenshot_path, world_name=last_world_name or "不明")
 
         screenshot_capture = ScreenshotCapture(logs_dir, screenshot_callback=screenshot_callback)
         logger.info("スクリーンショット撮影が有効になっています")

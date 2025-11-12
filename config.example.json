@@ -48,7 +48,11 @@
       "sensitivity": 0.10,
       "mode": "advanced",
       "consecutive_frames": 6,
-      "hold_seconds": 6.0
+      "hold_seconds": 6.0,
+      "notify_discord": true,
+      "flow_min": 0.15,
+      "base_score_threshold": 0.45,
+      "warmup_frames": 30
     }
   },
   "upload": {
