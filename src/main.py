@@ -615,6 +615,7 @@ def analyze_audio_recordings(specific_world_id: Optional[str] = None, specific_t
         for group_name, result in results.items():
             if result.get('skipped'):
                 logger.info(f"[{group_name}] スキップ: {result.get('skip_reason')}")
+                logger.info(f"  → AI分析をスキップしてコストを節約しました")
                 continue
 
             if result.get('error'):
@@ -633,14 +634,25 @@ def analyze_audio_recordings(specific_world_id: Optional[str] = None, specific_t
         # Discord通知（オプション）
         if discord_webhook and audio_config.get("notify_discord", False):
             for group_name, result in results.items():
-                if result.get('skipped') or result.get('error'):
-                    continue
+                # group_nameからワールド名を抽出（例: "wrld_xxx-20250113_041049"）
+                world_name = group_name.split('-')[0] if '-' in group_name else group_name
 
-                # 音声分析結果をDiscordに送信
                 try:
-                    # group_nameからワールド名を抽出（例: "wrld_xxx-20250113_041049"）
-                    world_name = group_name.split('-')[0] if '-' in group_name else group_name
+                    # スキップされた場合は会話なし通知
+                    if result.get('skipped'):
+                        skip_reason = result.get('skip_reason', '不明な理由')
+                        discord_webhook.send_no_conversation(
+                            world_name=world_name,
+                            reason=skip_reason
+                        )
+                        logger.info(f"[{group_name}] Discord通知を送信しました（会話なし）")
+                        continue
 
+                    # エラーの場合はスキップ
+                    if result.get('error'):
+                        continue
+
+                    # 音声分析結果をDiscordに送信
                     discord_webhook.send_conversation_summary(
                         world_name=world_name,
                         topics=result.get('topics', []),
@@ -649,7 +661,7 @@ def analyze_audio_recordings(specific_world_id: Optional[str] = None, specific_t
                         promises=result.get('promises'),
                         duration_minutes=None  # 録音時間は今後実装可能
                     )
-                    logger.info(f"[{group_name}] Discord通知を送信しました")
+                    logger.info(f"[{group_name}] Discord通知を送信しました（会話サマリ）")
                 except Exception as e:
                     logger.error(f"[{group_name}] Discord通知の送信に失敗: {e}")
 

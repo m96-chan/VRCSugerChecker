@@ -613,6 +613,43 @@ class DiscordWebhook:
         }
         return self.send(embed=embed)
 
+    def send_no_conversation(self, world_name: str, reason: str) -> bool:
+        """
+        会話がなかった場合の通知を送信
+        Args:
+            world_name: ワールド名
+            reason: スキップした理由
+        Returns:
+            bool: 送信成功ならTrue
+        """
+        embed = {
+            "title": "🔇 会話なし",
+            "description": "このワールドでは会話が検出されませんでした",
+            "color": 0x95a5a6,  # グレー
+            "fields": [
+                {
+                    "name": "🌍 ワールド",
+                    "value": world_name or "不明",
+                    "inline": False
+                },
+                {
+                    "name": "📊 スキップ理由",
+                    "value": reason,
+                    "inline": False
+                },
+                {
+                    "name": "💰 コスト削減",
+                    "value": "AI分析をスキップしてコストを節約しました",
+                    "inline": False
+                }
+            ],
+            "timestamp": datetime.utcnow().isoformat(),
+            "footer": {
+                "text": "VRChat Sugar Checker | AI Conversation Analysis"
+            }
+        }
+        return self.send(embed=embed)
+
     def send_time_summary(self, world_name: str, instance_id: str, total_duration: str,
                           user_times: Dict[str, str]) -> bool:
         """
