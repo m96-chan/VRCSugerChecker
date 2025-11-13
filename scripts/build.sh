@@ -26,7 +26,7 @@ echo ""
 echo "[3/4] PyInstallerでビルド中..."
 echo "この処理には数分かかる場合があります..."
 cd build
-python3 -m PyInstaller VRChatSugarChecker.spec
+python3 -m PyInstaller --distpath ../dist --workpath ../build/build VRChatSugarChecker.spec
 cd ..
 echo ""
 

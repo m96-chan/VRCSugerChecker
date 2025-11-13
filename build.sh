@@ -31,7 +31,7 @@ rm -rf build/VRChatSugarChecker
 
 # Build executable
 cd build
-uv run pyinstaller VRChatSugarChecker.spec
+uv run pyinstaller --distpath ../dist --workpath ../build/build VRChatSugarChecker.spec
 cd ..
 
 if [ -f dist/VRChatSugarChecker.exe ]; then

@@ -36,7 +36,7 @@ if exist build\VRChatSugarChecker rmdir /s /q build\VRChatSugarChecker
 
 REM Build executable
 cd build
-uv run pyinstaller VRChatSugarChecker.spec
+uv run pyinstaller --distpath ../dist --workpath ../build/build VRChatSugarChecker.spec
 cd ..
 
 if exist dist\VRChatSugarChecker.exe (

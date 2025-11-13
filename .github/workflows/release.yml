@@ -52,32 +52,62 @@ jobs:
         run: |
           uv sync
 
+      # Visual Studio Build Toolsをセットアップ（C++ネイティブ拡張ビルド用）
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      # Windows SDKをセットアップ
+      - name: Setup Windows SDK
+        uses: fbactions/setup-winsdk@v1
+        with:
+          winsdk-build-version: 22000
+
+      # C++ネイティブ拡張をビルド
+      - name: Build C++ Native Extension
+        run: |
+          .\build_native.bat
+        shell: cmd
+
       # PyInstallerでビルド
       - name: Build with PyInstaller
         run: |
           cd build
-          uv run pyinstaller VRChatSugarChecker.spec
+          uv run pyinstaller --distpath ../dist --workpath ../build/build VRChatSugarChecker.spec
           cd ..
         shell: powershell
 
       # 必要なファイルをdistフォルダにコピー
       - name: Copy required files
         run: |
-          if (-not (Test-Path "dist")) { New-Item -ItemType Directory -Path "dist" }
-          # PyInstallerのビルド結果をコピー
-          Copy-Item "build\dist\VRChatSugarChecker.exe" "dist\" -Force
+          # PyInstallerは既にdist/VRChatSugarChecker.exeを作成している
+          if (-not (Test-Path "dist\VRChatSugarChecker.exe")) {
+            Write-Error "PyInstaller output not found at dist\VRChatSugarChecker.exe"
+            exit 1
+          }
+
+          # ディレクトリ構造を作成
           if (-not (Test-Path "dist\logs")) { New-Item -ItemType Directory -Path "dist\logs" }
           if (-not (Test-Path "dist\logs\audio")) { New-Item -ItemType Directory -Path "dist\logs\audio" }
           if (-not (Test-Path "dist\logs\screenshots")) { New-Item -ItemType Directory -Path "dist\logs\screenshots" }
-          Copy-Item "logs\.gitkeep" "dist\logs\" -ErrorAction SilentlyContinue
-          Copy-Item "config.example.json" "dist\" -ErrorAction SilentlyContinue
-          Copy-Item "scripts\run_silent.vbs" "dist\" -ErrorAction SilentlyContinue
-          Copy-Item "scripts\install_startup.ps1" "dist\" -ErrorAction SilentlyContinue
-          Copy-Item "scripts\uninstall_startup.ps1" "dist\" -ErrorAction SilentlyContinue
-          Copy-Item "README.md" "dist\" -ErrorAction SilentlyContinue
-          Copy-Item "DEVELOPMENT.md" "dist\" -ErrorAction SilentlyContinue
-          Copy-Item "docs\BUILD_GUIDE.md" "dist\" -ErrorAction SilentlyContinue
-          Copy-Item "docs\AUDIO_RECORDING.md" "dist\" -ErrorAction SilentlyContinue
+          if (-not (Test-Path "dist\docs")) { New-Item -ItemType Directory -Path "dist\docs" }
+
+          # 設定ファイルとスクリプトをコピー
+          Copy-Item "config.example.json" "dist\" -Force
+          Copy-Item "scripts\run_silent.vbs" "dist\" -Force
+          Copy-Item "scripts\install_startup.ps1" "dist\" -Force
+          Copy-Item "scripts\uninstall_startup.ps1" "dist\" -Force
+
+          # ドキュメントをコピー
+          Copy-Item "README.md" "dist\" -Force
+          Copy-Item "DEVELOPMENT.md" "dist\" -Force
+          if (Test-Path "docs\BUILD_GUIDE.md") { Copy-Item "docs\BUILD_GUIDE.md" "dist\docs\" -Force }
+          if (Test-Path "docs\AUDIO_RECORDING.md") { Copy-Item "docs\AUDIO_RECORDING.md" "dist\docs\" -Force }
+
+          # logsディレクトリのプレースホルダー
+          if (Test-Path "logs\.gitkeep") { Copy-Item "logs\.gitkeep" "dist\logs\" -Force }
+
+          Write-Host "Files copied successfully to dist/"
+          Get-ChildItem dist -Recurse | Select-Object FullName
         shell: powershell
 
       # Inno Setupでインストーラーを作成
