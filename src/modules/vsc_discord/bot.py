@@ -26,7 +26,7 @@ try:
     if str(module_path) not in sys.path:
         sys.path.insert(0, str(module_path))
 
-    from discord.vrchat_audio_source import VRChatAudioSource, get_vrchat_pid
+    from vsc_discord.vrchat_audio_source import VRChatAudioSource, get_vrchat_pid
     VRCHAT_AUDIO_AVAILABLE = True
 except ImportError as e:
     VRCHAT_AUDIO_AVAILABLE = False
@@ -245,8 +245,11 @@ class VRChatSugarBot(commands.Bot):
 
             if len(members) == 0:
                 logger.info("No members in voice channel, leaving...")
+                # VRChat音声ストリーミングを停止
+                await self.stop_vrchat_audio_stream()
                 await self.voice_client.disconnect()
                 self.voice_client = None
+                logger.info("Left voice channel")
 
     async def process_message_queue(self):
         """メッセージキューを処理（main.pyからの指示を受信）"""
@@ -474,15 +477,39 @@ def run_bot_process(config: Dict, message_queue: multiprocessing.Queue, log_queu
         message_queue: メインプロセスからの指示を受け取るキュー
         log_queue: ログをメインプロセスに送信するキュー
     """
-    # ログ設定（キューハンドラを使用）
-    from logging.handlers import QueueHandler
+    # ログ設定（キューハンドラ + Bot専用ファイルハンドラ）
+    from logging.handlers import QueueHandler, TimedRotatingFileHandler
+
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.INFO)
     root_logger.handlers.clear()
+
+    # メインプロセスのログキューに送信（vrchat_checker.logに出力される）
     queue_handler = QueueHandler(log_queue)
     root_logger.addHandler(queue_handler)
 
+    # Bot専用のログファイルハンドラ（vrchat_checker_bot.logに出力）
+    logs_dir = Path(__file__).parent.parent.parent.parent / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    bot_log_file = logs_dir / "vrchat_checker_bot.log"
+
+    log_format = '%(asctime)s [%(levelname)s] %(message)s'
+    date_format = '%Y-%m-%d %H:%M:%S'
+    formatter = logging.Formatter(log_format, date_format)
+
+    bot_file_handler = TimedRotatingFileHandler(
+        filename=str(bot_log_file),
+        when='midnight',
+        interval=1,
+        backupCount=7,
+        encoding='utf-8'
+    )
+    bot_file_handler.setFormatter(formatter)
+    bot_file_handler.suffix = "%Y%m%d"
+    root_logger.addHandler(bot_file_handler)
+
     logger.info("Bot process started")
+    logger.info(f"Bot log file: {bot_log_file}")
 
     # シグナルハンドラを設定（Ctrl+Cなどで終了）
     def signal_handler(signum, frame):

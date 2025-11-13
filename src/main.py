@@ -21,7 +21,7 @@ from logging.handlers import TimedRotatingFileHandler, QueueHandler, QueueListen
 sys.path.insert(0, str(Path(__file__).parent / "modules" / "vrc"))
 sys.path.insert(0, str(Path(__file__).parent / "modules"))
 import parse_logs
-from discord.webhook import DiscordWebhook
+from vsc_discord.webhook import DiscordWebhook
 from screenshot.capture import ScreenshotCapture
 from audio.recorder import AudioRecorder
 from upload.uploader import FileUploader
@@ -39,6 +39,13 @@ try:
     AUDIO_ANALYZER_AVAILABLE = True
 except ImportError:
     AUDIO_ANALYZER_AVAILABLE = False
+
+# Discord Botのインポート（オプショナル）
+try:
+    from vsc_discord.bot import BotProcessManager
+    DISCORD_BOT_AVAILABLE = True
+except ImportError:
+    DISCORD_BOT_AVAILABLE = False
 
 # ロガー設定
 logger = logging.getLogger(__name__)
@@ -140,7 +147,7 @@ def setup_logging(logs_dir: Path) -> tuple[multiprocessing.Queue, QueueListener]
 
 def cleanup_old_logs(logs_dir: Path, days: int = 7) -> None:
     """
-    古いログファイルを削除
+    古いログファイルを削除（vrchat_checker.log、vrchat_checker_bot.logを含む）
     Args:
         logs_dir: ログディレクトリのパス
         days: 保持する日数
@@ -1086,15 +1093,15 @@ def main():
     # Discord Botの初期化
     bot_config = discord_config.get("bot", {})
     if bot_config.get("enabled", False):
-        try:
-            from discord.bot import BotProcessManager
-            bot_manager = BotProcessManager(bot_config, log_queue)
-            bot_manager.start()
-            logger.info("Discord Botプロセスが起動しました")
-        except ImportError:
-            logger.error("discord.botモジュールのインポートに失敗しました")
-        except Exception as e:
-            logger.error(f"Discord Bot起動エラー: {e}")
+        if DISCORD_BOT_AVAILABLE:
+            try:
+                bot_manager = BotProcessManager(bot_config, log_queue)
+                bot_manager.start()
+                logger.info("Discord Botプロセスが起動しました")
+            except Exception as e:
+                logger.error(f"Discord Bot起動エラー: {e}")
+        else:
+            logger.error("discord.botモジュールが利用できません")
     else:
         logger.info("Discord Botは無効です")
 
