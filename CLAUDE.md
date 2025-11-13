@@ -36,8 +36,6 @@ uv run python main.py --interval 10
 
 # Install dependencies
 uv sync
-# or
-pip install -r requirements.txt
 
 # Build C++ native extension (required first time and after C++ changes)
 build_native.bat      # Windows
