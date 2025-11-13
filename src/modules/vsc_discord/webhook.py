@@ -521,8 +521,8 @@ class DiscordWebhook:
             return None
 
         try:
-            # インスタンスIDをURLエンコード
-            encoded_instance = quote(instance_id, safe='')
+            # インスタンスIDをURLエンコード（:はエンコードしない）
+            encoded_instance = quote(instance_id, safe=':')
             # VRChat起動リンク
             # vrchat://launch?id=wrld_xxx:12345~...
             return f"https://vrchat.com/home/launch?worldId={encoded_instance}"
