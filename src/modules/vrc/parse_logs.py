@@ -69,12 +69,13 @@ def get_latest_log_file(log_dir: Path) -> Path:
     return latest_log
 
 
-def parse_vrchat_log(log_file: Path, verbose: bool = False) -> Dict:
+def parse_vrchat_log(log_file: Path, verbose: bool = False, previous_instance_id: str = None) -> Dict:
     """
     VRChatログファイルを解析
     Args:
         log_file: ログファイルのパス
         verbose: 詳細ログを表示するか
+        previous_instance_id: 前回のインスタンスID（新規Join判定用）
     Returns:
         Dict: 解析結果
     """
@@ -241,10 +242,16 @@ def parse_vrchat_log(log_file: Path, verbose: bool = False) -> Dict:
 
                         just_joined_instance = False  # フラグをリセット
                         temp_joined_users = []
-                        self_joined_new_instance = True  # 自分がJoinしたフラグ
-                        if verbose:
-                            print(f"[INFO] 既存ユーザー確定: {len(existing_users_on_join)}人 (自分自身のJoin検出)")
-                            print(f"[INFO] インスタンス変更確定 - Discord通知を送信すべき")
+
+                        # 本当に新しいインスタンスにJoinした場合のみTrueにする
+                        if current_instance != previous_instance_id:
+                            self_joined_new_instance = True  # 自分がJoinしたフラグ
+                            if verbose:
+                                print(f"[INFO] 既存ユーザー確定: {len(existing_users_on_join)}人 (自分自身のJoin検出)")
+                                print(f"[INFO] インスタンス変更確定 - Discord通知を送信すべき")
+                        else:
+                            if verbose:
+                                print(f"[INFO] 同じインスタンスのログを再読み込み (previous: {previous_instance_id})")
 
                 join_events.append({
                     'time': timestamp,

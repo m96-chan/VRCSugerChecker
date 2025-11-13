@@ -425,8 +425,8 @@ def update_log_monitoring():
         # 最新のログファイルを取得
         log_file = parse_logs.get_latest_log_file(log_dir)
 
-        # ログを解析
-        result = parse_logs.parse_vrchat_log(log_file, verbose=False)
+        # ログを解析（前回のインスタンスIDを渡す）
+        result = parse_logs.parse_vrchat_log(log_file, verbose=False, previous_instance_id=last_instance_id)
 
         current_instance = result['current_instance']
         current_users = result['users_in_instance']
