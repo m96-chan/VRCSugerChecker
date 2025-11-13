@@ -2,7 +2,7 @@
 ; https://jrsoftware.org/isinfo.php
 
 #define MyAppName "VRChat Sugar Checker"
-#define MyAppVersion "0.1.0"
+#define MyAppVersion "0.1.1"
 #define MyAppPublisher "m96-chan"
 #define MyAppURL "https://github.com/m96-chan/VRCSugerChecker"
 #define MyAppExeName "VRChatSugarChecker.exe"
