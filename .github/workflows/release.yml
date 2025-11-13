@@ -38,16 +38,28 @@ jobs:
       # デバッグ: チェックアウトされたファイルを確認
       - name: Debug - List checked out files
         run: |
+          Write-Host "=== Repository Structure Debug ==="
           Write-Host "Current directory: $(Get-Location)"
+          Write-Host ""
+          Write-Host "Root directory contents:"
+          Get-ChildItem -Force | Select-Object Name, Length | Format-Table
           Write-Host ""
           Write-Host "Build directory contents:"
           Get-ChildItem -Path build -Force | Format-Table Name, Length
           Write-Host ""
-          Write-Host "Checking for spec file:"
-          if (Test-Path "build\VRChatSugarChecker.spec") {
-            Write-Host "[OK] VRChatSugarChecker.spec found"
-          } else {
-            Write-Host "[ERROR] VRChatSugarChecker.spec NOT found"
+          Write-Host "Checking for required files:"
+          $files = @(
+            "build\VRChatSugarChecker.spec",
+            "build\installer.iss",
+            "build_native.bat",
+            "src\main.py"
+          )
+          foreach ($file in $files) {
+            if (Test-Path $file) {
+              Write-Host "[OK] $file"
+            } else {
+              Write-Host "[ERROR] $file NOT FOUND"
+            }
           }
         shell: powershell
 
@@ -87,9 +99,7 @@ jobs:
       # PyInstallerでビルド
       - name: Build with PyInstaller
         run: |
-          cd build
-          uv run pyinstaller --distpath ../dist --workpath ../build/build VRChatSugarChecker.spec
-          cd ..
+          uv run pyinstaller --distpath dist --workpath build/build build/VRChatSugarChecker.spec
         shell: powershell
 
       # 必要なファイルをdistフォルダにコピー
