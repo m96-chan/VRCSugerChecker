@@ -39,14 +39,15 @@ jobs:
       - name: Debug - List checked out files
         run: |
           Write-Host "Current directory: $(Get-Location)"
-          Write-Host "`nBuild directory contents:"
+          Write-Host ""
+          Write-Host "Build directory contents:"
           Get-ChildItem -Path build -Force | Format-Table Name, Length
-          Write-Host "`nChecking for spec file:"
-          Test-Path "build\VRChatSugarChecker.spec"
+          Write-Host ""
+          Write-Host "Checking for spec file:"
           if (Test-Path "build\VRChatSugarChecker.spec") {
-            Write-Host "✓ VRChatSugarChecker.spec found"
+            Write-Host "[OK] VRChatSugarChecker.spec found"
           } else {
-            Write-Host "✗ VRChatSugarChecker.spec NOT found"
+            Write-Host "[ERROR] VRChatSugarChecker.spec NOT found"
           }
         shell: powershell
 
