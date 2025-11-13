@@ -35,6 +35,21 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # デバッグ: チェックアウトされたファイルを確認
+      - name: Debug - List checked out files
+        run: |
+          Write-Host "Current directory: $(Get-Location)"
+          Write-Host "`nBuild directory contents:"
+          Get-ChildItem -Path build -Force | Format-Table Name, Length
+          Write-Host "`nChecking for spec file:"
+          Test-Path "build\VRChatSugarChecker.spec"
+          if (Test-Path "build\VRChatSugarChecker.spec") {
+            Write-Host "✓ VRChatSugarChecker.spec found"
+          } else {
+            Write-Host "✗ VRChatSugarChecker.spec NOT found"
+          }
+        shell: powershell
+
       # Python環境をセットアップ
       - name: Set up Python
         uses: actions/setup-python@v5
