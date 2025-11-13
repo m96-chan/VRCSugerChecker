@@ -98,10 +98,11 @@ jobs:
 
       # PyInstallerでビルド
       - name: Build with PyInstaller
+        working-directory: ${{ github.workspace }}
         run: |
           $specPath = Join-Path $PWD "build\VRChatSugarChecker.spec"
           uv run pyinstaller --distpath dist --workpath build/build $specPath
-        shell: powershell
+        shell: pwsh
 
       # 必要なファイルをdistフォルダにコピー
       - name: Copy required files
