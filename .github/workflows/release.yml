@@ -96,6 +96,16 @@ jobs:
           .\build_native.bat
         shell: cmd
 
+      - name: List all files (debug)
+        working-directory: ${{ github.workspace }}
+        shell: pwsh
+        run: |
+          Write-Host "==== Listing all files recursively ===="
+          Get-ChildItem -Recurse | ForEach-Object {
+            $fullPath = $_.FullName.Replace($PWD, '.')
+            Write-Output $fullPath
+          }
+
       # PyInstallerでビルド
       - name: Build with PyInstaller
         working-directory: ${{ github.workspace }}
