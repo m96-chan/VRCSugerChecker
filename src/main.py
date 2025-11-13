@@ -10,10 +10,12 @@ import argparse
 import logging
 import json
 import threading
+import multiprocessing
+import atexit
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional, Dict
-from logging.handlers import TimedRotatingFileHandler
+from logging.handlers import TimedRotatingFileHandler, QueueHandler, QueueListener
 
 # modulesのparse_logs.pyをインポート
 sys.path.insert(0, str(Path(__file__).parent / "modules" / "vrc"))
@@ -48,6 +50,9 @@ audio_recorder: Optional[AudioRecorder] = None
 file_uploader: Optional[FileUploader] = None
 image_analyzer: Optional['ImageAnalyzer'] = None
 audio_analyzer: Optional['AudioAnalyzer'] = None
+bot_manager: Optional['BotProcessManager'] = None  # Discord Botプロセスマネージャー
+log_queue: Optional[multiprocessing.Queue] = None  # ログキュー（プロセス間共有）
+log_listener: Optional[QueueListener] = None  # ログリスナー
 config: Dict = {}
 last_instance_id: Optional[str] = None
 last_users: Dict[str, str] = {}
@@ -78,11 +83,13 @@ def send_to_webhooks(notification_type: str, send_func, *args, **kwargs):
                 logger.error(f"Webhook '{webhook.name}' への通知送信に失敗: {e}")
 
 
-def setup_logging(logs_dir: Path) -> None:
+def setup_logging(logs_dir: Path) -> tuple[multiprocessing.Queue, QueueListener]:
     """
-    ログ設定をセットアップ（7日間ローテーション）
+    ログ設定をセットアップ（7日間ローテーション + プロセス間共有）
     Args:
         logs_dir: ログディレクトリのパス
+    Returns:
+        tuple[Queue, QueueListener]: ログキューとリスナー
     """
     # logsディレクトリが存在しない場合は作成
     logs_dir.mkdir(parents=True, exist_ok=True)
@@ -95,17 +102,7 @@ def setup_logging(logs_dir: Path) -> None:
     date_format = '%Y-%m-%d %H:%M:%S'
     formatter = logging.Formatter(log_format, date_format)
 
-    # ルートロガーの設定
-    root_logger = logging.getLogger()
-    root_logger.setLevel(logging.INFO)
-
-    # 既存のハンドラーをクリア
-    root_logger.handlers.clear()
-
     # ファイルハンドラー（7日間ローテーション）
-    # when='midnight': 毎日真夜中にローテーション
-    # interval=1: 1日ごと
-    # backupCount=7: 7日分のバックアップを保持
     file_handler = TimedRotatingFileHandler(
         filename=str(log_file),
         when='midnight',
@@ -114,16 +111,31 @@ def setup_logging(logs_dir: Path) -> None:
         encoding='utf-8'
     )
     file_handler.setFormatter(formatter)
-    file_handler.suffix = "%Y%m%d"  # ローテーション時のファイル名に日付を追加
-    root_logger.addHandler(file_handler)
+    file_handler.suffix = "%Y%m%d"
 
     # コンソールハンドラー
     console_handler = logging.StreamHandler()
     console_handler.setFormatter(formatter)
-    root_logger.addHandler(console_handler)
+
+    # ログキューを作成（プロセス間で共有）
+    queue = multiprocessing.Queue(-1)
+
+    # QueueListenerを作成（ファイルとコンソールに出力）
+    listener = QueueListener(queue, file_handler, console_handler, respect_handler_level=True)
+    listener.start()
+
+    # ルートロガーにQueueHandlerを設定
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    root_logger.handlers.clear()
+    queue_handler = QueueHandler(queue)
+    root_logger.addHandler(queue_handler)
 
     logger.info(f"ログファイル: {log_file}")
     logger.info("ログローテーション: 7日間（毎日真夜中）")
+    logger.info("プロセス間ログ共有が有効化されました")
+
+    return queue, listener
 
 
 def cleanup_old_logs(logs_dir: Path, days: int = 7) -> None:
@@ -276,6 +288,15 @@ def monitor_vrchat_process(check_interval=5):
 
                 # Discord通知
                 send_to_webhooks("vrchat_stopped", "send_vrchat_stopped")
+
+                # Discord Botに状態を通知（VRChat停止）
+                if bot_manager:
+                    bot_manager.update_vrchat_status(
+                        instance=None,
+                        world=None,
+                        users=[],
+                        is_running=False
+                    )
 
                 stop_log_monitoring()
 
@@ -547,6 +568,15 @@ def update_log_monitoring():
         last_instance_id = current_instance
         last_users = current_users.copy()
         last_world_name = current_world
+
+        # Discord Botに状態を通知
+        if bot_manager:
+            bot_manager.update_vrchat_status(
+                instance=current_instance,
+                world=current_world,
+                users=list(current_users.keys()),
+                is_running=True
+            )
 
         # アバター検出のユーザー数を更新
         if screenshot_capture:
@@ -847,6 +877,7 @@ def upload_files_to_cloud():
 def main():
     """メイン処理"""
     global discord_webhooks, screenshot_capture, audio_recorder, file_uploader, image_analyzer, audio_analyzer, config
+    global bot_manager, log_queue, log_listener
 
     # コマンドライン引数のパース
     parser = argparse.ArgumentParser(description='VRChat Sugar Checker - VRChat.exeプロセス監視ツール')
@@ -857,8 +888,18 @@ def main():
     # ログディレクトリのパス
     logs_dir = Path(__file__).parent.parent / "logs"
 
-    # ログ設定のセットアップ
-    setup_logging(logs_dir)
+    # ログ設定のセットアップ（ログキューとリスナーを取得）
+    log_queue, log_listener = setup_logging(logs_dir)
+
+    # 終了時のクリーンアップを登録
+    def cleanup():
+        logger.info("Cleaning up...")
+        if bot_manager:
+            bot_manager.stop()
+        if log_listener:
+            log_listener.stop()
+
+    atexit.register(cleanup)
 
     # 古いログファイルのクリーンアップ
     cleanup_old_logs(logs_dir, days=7)
@@ -1041,6 +1082,21 @@ def main():
             logger.info("AI音声分析モジュールが利用できません")
         else:
             logger.info("AI機能は無効です（音声分析）")
+
+    # Discord Botの初期化
+    bot_config = discord_config.get("bot", {})
+    if bot_config.get("enabled", False):
+        try:
+            from discord.bot import BotProcessManager
+            bot_manager = BotProcessManager(bot_config, log_queue)
+            bot_manager.start()
+            logger.info("Discord Botプロセスが起動しました")
+        except ImportError:
+            logger.error("discord.botモジュールのインポートに失敗しました")
+        except Exception as e:
+            logger.error(f"Discord Bot起動エラー: {e}")
+    else:
+        logger.info("Discord Botは無効です")
 
     # プロセスチェック間隔
     check_interval = args.interval if args.interval else config.get("monitoring", {}).get("check_interval", 5)

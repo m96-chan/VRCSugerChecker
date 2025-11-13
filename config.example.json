@@ -20,7 +20,15 @@
           "audio_analysis": false
         }
       }
-    ]
+    ],
+    "bot": {
+      "enabled": false,
+      "token": "YOUR_BOT_TOKEN",
+      "command_prefix": "!",
+      "text_channel_id": null,
+      "voice_enabled": true,
+      "auto_join_voice": false
+    }
   },
   "monitoring": {
     "check_interval": 5,
