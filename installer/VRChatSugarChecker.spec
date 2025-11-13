@@ -4,7 +4,7 @@
 import os
 import sys
 
-# Get project root directory (parent of build/)
+# Get project root directory (parent of installer/)
 SPEC_DIR = os.path.abspath(SPECPATH)
 PROJECT_ROOT = os.path.dirname(SPEC_DIR)
 SRC_DIR = os.path.join(PROJECT_ROOT, 'src')

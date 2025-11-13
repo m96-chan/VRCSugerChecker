@@ -35,7 +35,7 @@ if exist dist\VRChatSugarChecker.exe del /q dist\VRChatSugarChecker.exe
 if exist build\VRChatSugarChecker rmdir /s /q build\VRChatSugarChecker
 
 REM Build executable
-cd build
+cd installer
 uv run pyinstaller --distpath ../dist --workpath ../build/build VRChatSugarChecker.spec
 cd ..
 

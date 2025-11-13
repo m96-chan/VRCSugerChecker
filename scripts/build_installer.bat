@@ -38,7 +38,7 @@ if not exist %ISCC% (
 )
 
 REM インストーラーをビルド
-%ISCC% "build\installer.iss"
+%ISCC% "installer\installer.iss"
 if errorlevel 1 (
     echo.
     echo [エラー] インストーラーの作成に失敗しました
