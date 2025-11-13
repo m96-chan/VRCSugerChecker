@@ -188,7 +188,7 @@ class DiscordWebhook:
             }
         ]
 
-        # インスタンスリンクを追加
+        # インスタンスリンクを追加（マークダウンリンク形式）
         if instance_link:
             fields.append({
                 "name": "🔗 インスタンスリンク",
@@ -212,6 +212,7 @@ class DiscordWebhook:
                 "text": "VRChat Sugar Checker"
             }
         }
+
         return self.send(embed=embed)
 
     def _create_user_fields(self, sorted_users: list, user_count: int) -> list:
@@ -355,7 +356,7 @@ class DiscordWebhook:
             }
         ]
 
-        # インスタンスリンクを追加
+        # インスタンスリンクを追加（マークダウンリンク形式）
         if instance_link:
             fields.append({
                 "name": "🔗 インスタンスリンク",
@@ -428,6 +429,7 @@ class DiscordWebhook:
                 "text": "VRChat Sugar Checker"
             }
         }
+
         return self.send(embed=embed)
 
     def send_instance_existing_users(self, world_name: str, users: dict) -> bool:
@@ -521,11 +523,20 @@ class DiscordWebhook:
             return None
 
         try:
-            # インスタンスIDをURLエンコード（:はエンコードしない）
-            encoded_instance = quote(instance_id, safe=':')
-            # VRChat起動リンク
-            # vrchat://launch?id=wrld_xxx:12345~...
-            return f"https://vrchat.com/home/launch?worldId={encoded_instance}"
+            # インスタンスIDを worldId と instanceId に分割
+            # 例: wrld_xxx:12345~hidden(usr_xxx)~region(jp)
+            #  -> worldId=wrld_xxx, instanceId=12345~hidden(usr_xxx)~region(jp)
+            if ':' not in instance_id:
+                return None
+
+            world_id, instance_part = instance_id.split(':', 1)
+
+            # URLエンコード（~, (, ) などをエンコード）
+            encoded_world_id = quote(world_id, safe='')
+            encoded_instance_part = quote(instance_part, safe='')
+
+            # HTTPS形式のVRChatリンク
+            return f"https://vrchat.com/home/launch?worldId={encoded_world_id}&instanceId={encoded_instance_part}"
         except Exception as e:
             logger.error(f"インスタンスリンクの生成に失敗: {e}")
             return None
